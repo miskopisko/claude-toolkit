@@ -83,6 +83,32 @@ export type CacheTaxView = {
   paidUsd: number
 }
 
+/** One reading of a running total (cost in dollars, a limit's percent used) at a time. */
+export type Sample = { at: number; value: number }
+
+/** The last hour or so of readings each pace is measured over. */
+export type Pace = {
+  cost: Sample[]
+  /** Keyed by the limit's `kind`. */
+  limits: Record<string, Sample[]>
+}
+
+/** What the prompt cache saved this session, main loop and agents, in dollars. */
+export type Savings = {
+  readsUsd: number
+  /** Cache writes' cost over the base input rate, priced at the 1-hour write rate. */
+  premiumUsd: number
+  /** Responses on a model with no price, left out of both figures. */
+  unpriced: number
+}
+
+/** The switches the pane's buttons and /session-stats toggle; each is remembered across sessions. */
+export type Settings = {
+  alerts: boolean
+  /** A desktop notification when a long turn finishes. */
+  notify: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'session-stats': {
@@ -93,6 +119,9 @@ declare module 'claude-code' {
       agents: AgentRow[]
       now: number
       cacheTax: CacheTaxView | null
+      pace: Pace
+      savings: Savings
+      settings: Settings
     }
   }
 }

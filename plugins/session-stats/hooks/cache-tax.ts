@@ -55,7 +55,7 @@ export type State = {
   stopped: string | null
 }
 
-function priceOf(model: string | null): [number, number, number] | null {
+export function priceOf(model: string | null): [number, number, number] | null {
   const m = (model ?? '').toLowerCase().replace(/[\s.]+/g, '-')
   for (const [family, read, write, output] of PRICES) if (m.includes(family)) return [read, write, output]
   return null
@@ -295,6 +295,23 @@ async function startWindow($: EngineInterface, s: State, windowMs: number, every
   await arm($, s)
 }
 
+/** Arms a six-hour window, as a bare /keepwarm does: the pane's keepwarm button. */
+export async function keepwarmOn($: EngineInterface, s: State) {
+  await startWindow($, s, DEFAULT_WINDOW_MS, PING_AFTER_MS)
+}
+
+/** Stops keepwarm and turns always off, as /keepwarm off does. */
+export async function keepwarmOff($: EngineInterface, s: State) {
+  await stop($, s, null, true)
+}
+
+/** Sets the guard mode and remembers it across sessions. */
+export async function setGuard($: EngineInterface, s: State, mode: GuardMode) {
+  s.guard = mode
+  await $.store.set(KEY_GUARD, mode)
+  await updateStatus($, s, await $.clock.now())
+}
+
 function card(s: State, now: number): string {
   const lines: string[] = []
   lines.push(`${s.lastModel ?? 'model not seen yet'}`)
@@ -436,7 +453,7 @@ export function hookCacheTax(on: On, s: State) {
     const now = await $.clock.now()
     if (words[0] === 'off') {
       const wasAlways = s.always
-      await stop($, s, null, true)
+      await keepwarmOff($, s)
       return { text: wasAlways ? 'keepwarm is off, and no longer arms itself at session start' : 'keepwarm is off' }
     }
     if (words[0] === 'always') {
@@ -447,7 +464,7 @@ export function hookCacheTax(on: On, s: State) {
       return { text: `keepwarm always on: every session starts with a ${fmtDuration(DEFAULT_WINDOW_MS)} window; /keepwarm off turns it off for good${cold}` }
     }
     if (!words.length) {
-      await startWindow($, s, DEFAULT_WINDOW_MS, PING_AFTER_MS)
+      await keepwarmOn($, s)
       return { text: armedText(s, now, DEFAULT_WINDOW_MS) }
     }
     const first = words[0] ?? ''
@@ -472,9 +489,7 @@ export function hookCacheTax(on: On, s: State) {
     const now = await $.clock.now()
     if (words[0] === 'guard') {
       if (words[1] !== 'warn' && words[1] !== 'refuse') return { text: '/cache-tax guard takes warn or refuse' }
-      s.guard = words[1]
-      await $.store.set(KEY_GUARD, s.guard)
-      await updateStatus($, s, now)
+      await setGuard($, s, words[1])
       return { text: s.guard === 'refuse' ? 'guard set to refuse once: a cold send is dropped with its price, the resend goes through' : 'guard set to warn: a cold send goes through with its price shown' }
     }
     return { text: card(s, now) }

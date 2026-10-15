@@ -1,7 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionContextUsage, SessionCost, SessionRateLimit, Timer } from 'claude-code'
 
-import type { AgentRow, CacheTaxView, Snapshot, ToolStats, Tokens, TurnInfo } from '../types'
+import type { AgentRow, CacheTaxView, Pace, Savings, Settings, Snapshot, ToolStats, Tokens, TurnInfo } from '../types'
+import { checkAlerts, freshAlerts, turnCostAlert } from './alerts'
+import type { Alerts } from './alerts'
 import {
   addUsage,
   bar,
@@ -20,12 +22,23 @@ import {
   cacheTaxTurnStep,
   freshState,
   hookCacheTax,
+  keepwarmOff,
+  keepwarmOn,
+  priceOf,
+  setGuard,
 } from './cache-tax'
+import { addSample, cacheSavings, perHour } from './pace'
 
 const PANE = 'session-stats'
 const TITLE = 'Session stats'
 const WIDTH = 46
+/** Cells of space between the pane's left edge and its text. */
+const GUTTER = 1
 const ACTIVE = new Set(['pending', 'running', 'waiting'])
+/** A main turn at least this long sends a desktop notification when it finishes. */
+const NOTIFY_AFTER_MS = 2 * 60 * 1000
+/** The store keys of the settings, each written only while it is off. */
+const SETTING_KEYS = { alerts: 'alerts', notify: 'notify' } as const
 
 const snap = atom({ plugin: 'session-stats', key: 'snap' } as const, {
   startedAt: null,
@@ -59,11 +72,26 @@ const agents = atom({ plugin: 'session-stats', key: 'agents' } as const, [] as A
 const now = atom({ plugin: 'session-stats', key: 'now' } as const, 0)
 // Written by hooks/cache-tax.ts, which declares the same reference.
 const cacheTaxView = atom({ plugin: 'session-stats', key: 'cacheTax' } as const, null as CacheTaxView | null)
+const pace = atom({ plugin: 'session-stats', key: 'pace' } as const, { cost: [], limits: {} } as Pace)
+const savings = atom({ plugin: 'session-stats', key: 'savings' } as const, {
+  readsUsd: 0,
+  premiumUsd: 0,
+  unpriced: 0,
+} satisfies Savings)
+const settings = atom({ plugin: 'session-stats', key: 'settings' } as const, { alerts: true, notify: true } satisfies Settings)
 
 type Measured = { context: SessionContextUsage; rateLimits: SessionRateLimit[]; cost?: SessionCost }
 
-function measured($: EngineInterface, m: Measured) {
-  return update($, snap, s => ({
+async function measured($: EngineInterface, m: Measured) {
+  const at = await $.clock.now()
+  await update($, pace, p => ({
+    cost: m.cost === undefined ? p.cost : addSample(p.cost, at, m.cost.usd),
+    limits: {
+      ...p.limits,
+      ...Object.fromEntries(m.rateLimits.map(r => [r.kind, addSample(p.limits[r.kind] ?? [], at, r.percentUsed)])),
+    },
+  }))
+  await update($, snap, s => ({
     ...s,
     contextTokens: m.context.tokens ?? s.contextTokens,
     contextWindow: m.context.window,
@@ -121,6 +149,45 @@ function stopTicker() {
   ticker = null
 }
 
+function say($: EngineInterface, line: string) {
+  $.ui.log(`session-stats: ${line}`)
+}
+
+/** Turns a setting on or off, for this session and the ones after it. */
+async function setSetting($: EngineInterface, name: keyof Settings, isOn: boolean) {
+  await update($, settings, v => ({ ...v, [name]: isOn }))
+  if (isOn) await $.store.delete(SETTING_KEYS[name])
+  else await $.store.set(SETTING_KEYS[name], false)
+}
+
+/** Flips a setting from what it is now, not from what a drawing showed: two quick presses land as two. */
+async function toggleSetting($: EngineInterface, name: keyof Settings) {
+  await setSetting($, name, !(await read($, settings))[name])
+}
+
+/** Logs what crossed an alert threshold since the last check, unless alerts are off. */
+async function raiseAlerts($: EngineInterface, alerts: Alerts) {
+  if (!(await read($, settings)).alerts) return
+  const [s, p] = await Promise.all([read($, snap), read($, pace)])
+  for (const line of checkAlerts(alerts, s, p, await $.clock.now())) say($, line)
+}
+
+/** The first line of an answer, cut to fit a notification. */
+function firstLine(text: string): string {
+  const line = text.trim().split('\n')[0]?.trim() ?? ''
+  return line.length > 100 ? `${line.slice(0, 99)}…` : line
+}
+
+/** Notifies the desktop that a long main turn finished; a channel that is off or fails is passed over. */
+async function notifyDone($: EngineInterface, ms: number, answer: string) {
+  const summary = firstLine(answer)
+  try {
+    await $.ui.notify(`Done after ${duration(ms)}${summary === '' ? '' : `: ${summary}`}`, { title: 'Claude Code' })
+  } catch {
+    // A hook refused it or the write failed: nothing to do.
+  }
+}
+
 function touchAgent(id: string, at: number, change: (r: AgentRow) => AgentRow) {
   return (rows: AgentRow[]) => {
     const row = rows.find(r => r.id === id) ?? {
@@ -141,17 +208,22 @@ function touchAgent(id: string, at: number, change: (r: AgentRow) => AgentRow) {
 export const register: Register = on => {
   const cacheTax = freshState()
   hookCacheTax(on, cacheTax)
+  const alerts = freshAlerts()
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'session-stats',
-      description: 'Toggle the session stats pane (/session-stats close hides it)',
+      description: 'Toggle the session stats pane (/session-stats close hides it; alerts on|off, notify on|off)',
+      argumentHint: '[close | alerts on|off | notify on|off]',
     })
+    const [alertsOff, notifyOff] = await Promise.all([$.store.get(SETTING_KEYS.alerts), $.store.get(SETTING_KEYS.notify)])
+    await update($, settings, () => ({ alerts: alertsOff !== false, notify: notifyOff !== false }))
     const started = await $.clock.now()
     const [usage, version] = await Promise.all([$.session.usage(), $.session.version()])
     await update($, snap, s => ({ ...s, startedAt: usage.startedAt ?? started, version: version.version }))
     await measured($, usage)
     await update($, now, () => started)
+    await raiseAlerts($, alerts)
 
     // Unasked, the pane is placed only on a wide terminal; its first draw starts the clock.
     void $.ui.open({ id: PANE, title: TITLE, columns: WIDTH })
@@ -162,7 +234,18 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'session-stats' }, async ($, e) => {
-    if (e.args.trim() === 'close') {
+    const words = e.args.trim().split(/\s+/)
+    const name = words[0]
+    if (name === 'alerts' || name === 'notify') {
+      const what = name === 'alerts' ? 'Alerts' : 'Notifications when a long turn finishes'
+      if (words[1] !== 'on' && words[1] !== 'off') {
+        const isOn = (await read($, settings))[name]
+        return { text: `${what} are ${isOn ? 'on' : 'off'}: /session-stats ${name} on|off` }
+      }
+      await setSetting($, name, words[1] === 'on')
+      return { text: words[1] === 'on' ? `${what} are on.` : `${what} are off, in every session until /session-stats ${name} on.` }
+    }
+    if (words[0] === 'close') {
       await $.ui.close({ id: PANE })
       stopTicker()
       return { text: 'Session stats pane closed.' }
@@ -183,6 +266,7 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     await measured($, e)
+    await raiseAlerts($, alerts)
     return next(e)
   })
 
@@ -190,6 +274,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const at = await $.clock.now()
       await update($, turn, t => ({ ...t, count: t.count + 1, runningSince: at, steps: 0 }))
+      alerts.turnStartUsd = (await $.session.usage()).cost?.usd ?? null
     }
     return next(e)
   })
@@ -200,6 +285,13 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       await update($, turn, t => ({ ...t, runningSince: null, lastMs: e.durationMs }))
       await measured($, await $.session.usage())
+      const costly = turnCostAlert(alerts, (await read($, snap)).costUsd)
+      const prefs = await read($, settings)
+      if (costly !== null && prefs.alerts) say($, costly)
+      await raiseAlerts($, alerts)
+      if (prefs.notify && !e.isAborted && e.durationMs >= NOTIFY_AFTER_MS) {
+        await notifyDone($, e.durationMs, e.reason === 'refusal' ? 'the model declined' : e.answer)
+      }
     } else {
       const at = await $.clock.now()
       await update($, agents, touchAgent(e.agentId, at, r => ({ ...r, lastSeen: at })))
@@ -223,6 +315,13 @@ export const register: Register = on => {
     const u = result.usage
     if (u !== null) {
       const at = await $.clock.now()
+      const price = priceOf(u.model)
+      const saved = price === null ? null : cacheSavings(u, price)
+      await update($, savings, v =>
+        saved === null
+          ? { ...v, unpriced: v.unpriced + 1 }
+          : { ...v, readsUsd: v.readsUsd + saved.readsUsd, premiumUsd: v.premiumUsd + saved.premiumUsd },
+      )
       if (e.agentId === undefined) {
         await update($, tokens, t => ({
           ...t,
@@ -284,8 +383,8 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     startTicker($)
-    const { Box, Text } = $.ui.resolve(e)
-    const [s, tk, t, tl, ag, tickAt, ct] = await Promise.all([
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const [s, tk, t, tl, ag, tickAt, ct, pc, sv, prefs] = await Promise.all([
       read($, snap),
       read($, tokens),
       read($, turn),
@@ -293,11 +392,15 @@ export const register: Register = on => {
       read($, agents),
       read($, now),
       read($, cacheTaxView),
+      read($, pace),
+      read($, savings),
+      read($, settings),
     ])
     // The tick redraws the pane each second; the live clock keeps a pane drawn again after a while hidden from showing an old time.
     const at = Math.max(tickAt, await $.clock.now())
-    const cols = Math.max(24, e.props.bodyColumns)
+    const cols = Math.max(24, e.props.bodyColumns - GUTTER)
     const barWidth = Math.max(6, Math.min(20, cols - 26))
+    const half = Math.floor(cols / 2)
 
     const head = (children: string) => (
       <Box marginTop={1}>
@@ -327,7 +430,11 @@ export const register: Register = on => {
     const allHit = hitRate(tk.main)
     const age = last === null ? null : at - last.at
     // Warm or cold by the clock now, not as of cache-tax's last change: the cache lapses with nothing happening.
+    const netSaved = sv.readsUsd - sv.premiumUsd
     const cacheState = ct === null || ct.expiresAt === null ? 'unknown' : at >= ct.expiresAt ? 'cold' : 'warm'
+
+    // Pace
+    const burn = perHour(pc.cost, at)
 
     // Tools
     const totalCalls = Object.values(tl.counts).reduce((a, b) => a + b, 0)
@@ -350,7 +457,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" width={cols}>
+      <Box flexDirection="column" width={cols + GUTTER} paddingLeft={GUTTER}>
         <Text bold>Session</Text>
         {row("Model", model ?? 'not seen yet')}
         {s.effort !== null && row("Effort", s.effort)}
@@ -358,6 +465,7 @@ export const register: Register = on => {
         {row("Uptime", s.startedAt === null ? '—' : duration(at - s.startedAt))}
         {row("Turns", `${t.count}${t.lastMs === null ? '' : ` · last ${duration(t.lastMs)}`}${t.compactions > 0 ? ` · ${t.compactions} compacted` : ''}`)}
         {s.costUsd !== null && row("Cost", usd(s.costUsd))}
+        {burn !== null && row("Burn rate", `${usd(burn)} an hour`)}
 
         {head('Context')}
         {ctxPct === null ? (
@@ -378,25 +486,15 @@ export const register: Register = on => {
         {s.rateLimits.length === 0 ? (
           <Text dimColor>No reading (API key, or no response yet).</Text>
         ) : (
-          s.rateLimits.map(r => {
-            const left = Math.max(0, 100 - r.percentUsed)
-            const resets = r.resetsAt === undefined ? null : Date.parse(r.resetsAt) - at
-            return (
-              <Box flexDirection="column" key={r.kind}>
-                <Box>
-                  <Box width={13} flexShrink={0}>
-                    <Text dimColor>{limitName(r.kind)}</Text>
-                  </Box>
-                  <Text color={levelColor(r.percentUsed)}>{bar(r.percentUsed, barWidth)}</Text>
-                </Box>
-                <Text dimColor>
-                  {'             '}
-                  {left.toFixed(left % 1 === 0 ? 0 : 1)}% left
-                  {resets === null || Number.isNaN(resets) ? '' : ` · resets in ${duration(resets)}`}
-                </Text>
+          s.rateLimits.map(r => (
+            <Box key={r.kind}>
+              <Box width={13} flexShrink={0}>
+                <Text dimColor>{limitName(r.kind)}</Text>
               </Box>
-            )
-          })
+              <Text color={levelColor(r.percentUsed)}>{bar(r.percentUsed, barWidth)}</Text>
+              <Text> {Math.round(r.percentUsed)}%</Text>
+            </Box>
+          ))
         )}
 
         {head('Tokens')}
@@ -419,6 +517,20 @@ export const register: Register = on => {
             </Text>
             {row("Session hit", allHit === null ? '—' : `${allHit}%`)}
             {row("Idle for", age === null ? '—' : duration(age))}
+            {(sv.readsUsd > 0 || sv.premiumUsd > 0) && (
+              <>
+                {row(
+                  "Cache saved",
+                  netSaved >= 0 ? `${usd(netSaved)} net` : `-${usd(-netSaved)} net`,
+                  netSaved >= 0 ? 'success' : 'warning',
+                )}
+                <Text dimColor wrap="truncate-end">
+                  {'             '}
+                  {usd(sv.readsUsd)} on reads · {usd(sv.premiumUsd)} on writes
+                  {sv.unpriced > 0 ? ` · ${sv.unpriced} unpriced` : ''}
+                </Text>
+              </>
+            )}
           </>
         )}
 
@@ -506,6 +618,39 @@ export const register: Register = on => {
             })}
           </>
         )}
+
+        {head('Controls')}
+        <Box>
+          <Box width={half} flexShrink={0}>
+            {ct === null ? (
+              <Text dimColor>k: keepwarm …</Text>
+            ) : (
+              <Button
+                key="keepwarm"
+                plain
+                hotkey="k"
+                label={`keepwarm ${ct.deadline === null ? 'off' : 'on'}`}
+                onPress={() => (cacheTax.deadline ? keepwarmOff($, cacheTax) : keepwarmOn($, cacheTax))}
+              />
+            )}
+          </Box>
+          {ct !== null && (
+            <Button
+              key="guard"
+              plain
+              hotkey="g"
+              label={`guard ${ct.guard}`}
+              onPress={() => setGuard($, cacheTax, cacheTax.guard === 'refuse' ? 'warn' : 'refuse')}
+            />
+          )}
+        </Box>
+        <Box>
+          <Box width={half} flexShrink={0}>
+            <Button key="alerts" plain hotkey="a" label={`alerts ${prefs.alerts ? 'on' : 'off'}`} onPress={() => toggleSetting($, 'alerts')} />
+          </Box>
+          <Button key="notify" plain hotkey="n" label={`notify ${prefs.notify ? 'on' : 'off'}`} onPress={() => toggleSetting($, 'notify')} />
+        </Box>
+        <Text dimColor>Click, or ctrl+x tab then the key.</Text>
         {s.version !== null && (
           <Box marginTop={1}>
             <Text dimColor>Claude Code {s.version}</Text>
