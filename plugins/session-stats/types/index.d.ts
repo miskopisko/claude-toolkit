@@ -64,6 +64,25 @@ export type AgentRow = {
   lastTool: string | null
 }
 
+/** The cache-tax part of the pane: its one-hour clock, prices, keepwarm window and tally. */
+export type CacheTaxView = {
+  lastRequestAt: number
+  /** When the one-hour cache lapses (or lapsed); null before the first request or after compaction. */
+  expiresAt: number | null
+  ctx: number
+  coldUsd: number | null
+  warmUsd: number | null
+  /** The keepwarm window's end; null while keepwarm is off. */
+  deadline: number | null
+  nextPingAt: number | null
+  stopped: string | null
+  lastPing: { at: number; read: number; usd: number | null } | null
+  guard: 'refuse' | 'warn'
+  always: boolean
+  coldWrites: number
+  paidUsd: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'session-stats': {
@@ -73,6 +92,7 @@ declare module 'claude-code' {
       tools: ToolStats
       agents: AgentRow[]
       now: number
+      cacheTax: CacheTaxView | null
     }
   }
 }

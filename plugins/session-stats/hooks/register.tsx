@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, SessionCost, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, SessionCost, SessionRateLimit, Timer } from 'claude-code'
 
-import type { AgentRow, Snapshot, ToolStats, Tokens, TurnInfo } from '../types'
+import type { AgentRow, CacheTaxView, Snapshot, ToolStats, Tokens, TurnInfo } from '../types'
 import {
   addUsage,
   bar,
@@ -13,6 +13,14 @@ import {
   tokens as tok,
   usd,
 } from './format'
+import {
+  cacheTaxSessionCompact,
+  cacheTaxSessionStart,
+  cacheTaxTurnComplete,
+  cacheTaxTurnStep,
+  freshState,
+  hookCacheTax,
+} from './cache-tax'
 
 const PANE = 'session-stats'
 const TITLE = 'Session stats'
@@ -49,6 +57,8 @@ const tools = atom({ plugin: 'session-stats', key: 'tools' } as const, {
 } satisfies ToolStats)
 const agents = atom({ plugin: 'session-stats', key: 'agents' } as const, [] as AgentRow[])
 const now = atom({ plugin: 'session-stats', key: 'now' } as const, 0)
+// Written by hooks/cache-tax.ts, which declares the same reference.
+const cacheTaxView = atom({ plugin: 'session-stats', key: 'cacheTax' } as const, null as CacheTaxView | null)
 
 type Measured = { context: SessionContextUsage; rateLimits: SessionRateLimit[]; cost?: SessionCost }
 
@@ -91,6 +101,26 @@ async function pollAgents($: EngineInterface) {
   })
 }
 
+// The pane's clock: one tick a second, run only while the pane is drawn, so a
+// hidden pane costs nothing. The agent list is polled on every other tick.
+let ticker: Timer | null = null
+
+function startTicker($: EngineInterface) {
+  if (ticker !== null) return
+  let ticks = 0
+  ticker = $.clock.every(1000, async () => {
+    ticks += 1
+    const tickAt = await $.clock.now()
+    await update($, now, () => tickAt)
+    if (ticks % 2 === 0) await pollAgents($)
+  })
+}
+
+function stopTicker() {
+  ticker?.cancel()
+  ticker = null
+}
+
 function touchAgent(id: string, at: number, change: (r: AgentRow) => AgentRow) {
   return (rows: AgentRow[]) => {
     const row = rows.find(r => r.id === id) ?? {
@@ -109,6 +139,9 @@ function touchAgent(id: string, at: number, change: (r: AgentRow) => AgentRow) {
 }
 
 export const register: Register = on => {
+  const cacheTax = freshState()
+  hookCacheTax(on, cacheTax)
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'session-stats',
@@ -120,22 +153,18 @@ export const register: Register = on => {
     await measured($, usage)
     await update($, now, () => started)
 
-    let ticks = 0
-    $.clock.every(1000, async () => {
-      ticks += 1
-      const tickAt = await $.clock.now()
-      await update($, now, () => tickAt)
-      if (ticks % 2 === 0) await pollAgents($)
-    })
-
+    // Unasked, the pane is placed only on a wide terminal; its first draw starts the clock.
     void $.ui.open({ id: PANE, title: TITLE, columns: WIDTH })
 
-    return next(e)
+    const result = await next(e)
+    await cacheTaxSessionStart($, cacheTax)
+    return result
   })
 
   on('command.run', { command: 'session-stats' }, async ($, e) => {
     if (e.args.trim() === 'close') {
       await $.ui.close({ id: PANE })
+      stopTicker()
       return { text: 'Session stats pane closed.' }
     }
     const opened = await $.ui.open({ id: PANE, title: TITLE, columns: WIDTH })
@@ -145,6 +174,12 @@ export const register: Register = on => {
         : `Session stats pane is waiting to be placed: ${opened.reason}`,
     }
   })
+
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const closed = await next(e)
+    stopTicker()
+    return closed
+  }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
     await measured($, e)
@@ -160,6 +195,8 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    await cacheTaxTurnComplete($, cacheTax, e)
     if (e.agentId === undefined) {
       await update($, turn, t => ({ ...t, runningSince: null, lastMs: e.durationMs }))
       await measured($, await $.session.usage())
@@ -167,10 +204,11 @@ export const register: Register = on => {
       const at = await $.clock.now()
       await update($, agents, touchAgent(e.agentId, at, r => ({ ...r, lastSeen: at })))
     }
-    return next(e)
+    return done
   })
 
   on('turn.step', async function* ($, e, next) {
+    await cacheTaxTurnStep($, cacheTax, e)
     if (e.agentId === undefined) {
       await update($, turn, t => ({ ...t, steps: e.index + 1 }))
       await update($, snap, s => ({
@@ -236,20 +274,28 @@ export const register: Register = on => {
 
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
-    if (e.trigger !== 'precompute') await update($, turn, t => ({ ...t, compactions: t.compactions + 1 }))
+    // A precompute installs nothing: the conversation is not compacted until a later dispatch uses it.
+    if (e.trigger !== 'precompute') {
+      await update($, turn, t => ({ ...t, compactions: t.compactions + 1 }))
+      await cacheTaxSessionCompact($, cacheTax, e)
+    }
     return done
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    startTicker($)
     const { Box, Text } = $.ui.resolve(e)
-    const [s, tk, t, tl, ag, at] = await Promise.all([
+    const [s, tk, t, tl, ag, tickAt, ct] = await Promise.all([
       read($, snap),
       read($, tokens),
       read($, turn),
       read($, tools),
       read($, agents),
       read($, now),
+      read($, cacheTaxView),
     ])
+    // The tick redraws the pane each second; the live clock keeps a pane drawn again after a while hidden from showing an old time.
+    const at = Math.max(tickAt, await $.clock.now())
     const cols = Math.max(24, e.props.bodyColumns)
     const barWidth = Math.max(6, Math.min(20, cols - 26))
 
@@ -280,11 +326,8 @@ export const register: Register = on => {
     const lastHit = last === null ? null : hitRate(last)
     const allHit = hitRate(tk.main)
     const age = last === null ? null : at - last.at
-    const ttl = (mins: number) => {
-      if (age === null) return '—'
-      const left = mins * 60_000 - age
-      return left > 0 ? `${duration(left)} left` : 'expired'
-    }
+    // Warm or cold by the clock now, not as of cache-tax's last change: the cache lapses with nothing happening.
+    const cacheState = ct === null || ct.expiresAt === null ? 'unknown' : at >= ct.expiresAt ? 'cold' : 'warm'
 
     // Tools
     const totalCalls = Object.values(tl.counts).reduce((a, b) => a + b, 0)
@@ -376,8 +419,53 @@ export const register: Register = on => {
             </Text>
             {row("Session hit", allHit === null ? '—' : `${allHit}%`)}
             {row("Idle for", age === null ? '—' : duration(age))}
-            {row("5m TTL", ttl(5), age !== null && age > 300_000 ? 'error' : undefined)}
-            {row("1h TTL", ttl(60), age !== null && age > 3_600_000 ? 'error' : undefined)}
+          </>
+        )}
+
+        {head('Cache tax')}
+        {ct === null ? (
+          <Text dimColor>Starting…</Text>
+        ) : (
+          <>
+            {row(
+              'Cache',
+              cacheState === 'unknown'
+                ? 'unknown until the next turn'
+                : cacheState === 'cold'
+                  ? `cold for ${duration(at - (ct.expiresAt ?? at))}`
+                  : `warm, ${duration((ct.expiresAt ?? at) - at)} left`,
+              cacheState === 'warm' ? 'success' : cacheState === 'cold' ? 'error' : undefined,
+            )}
+            {ct.ctx > 0 &&
+              row(
+                'Cold cost',
+                `${ct.coldUsd === null ? 'n/a' : usd(ct.coldUsd)} to re-write${ct.warmUsd === null ? '' : ` · warm ${usd(ct.warmUsd)}`}`,
+              )}
+            {row(
+              'Keepwarm',
+              ct.stopped !== null
+                ? `stopped: ${ct.stopped}`
+                : ct.deadline === null
+                  ? ct.always ? 'off until next session (always)' : 'off · /keepwarm to arm'
+                  : `on, ${duration(ct.deadline - at)} left${ct.always ? ' (always)' : ''}`,
+              ct.stopped !== null ? 'warning' : ct.deadline === null ? undefined : 'success',
+            )}
+            {ct.deadline !== null &&
+              row(
+                'Next ping',
+                ct.nextPingAt !== null && cacheState === 'warm' ? `in ${duration(Math.max(0, ct.nextPingAt - at))}` : 'after the next turn',
+              )}
+            {ct.lastPing !== null &&
+              row(
+                'Last ping',
+                `read ${tok(ct.lastPing.read)} · ${ct.lastPing.usd === null ? 'n/a' : usd(ct.lastPing.usd)} · ${duration(at - ct.lastPing.at)} ago`,
+              )}
+            {row('Guard', ct.guard === 'refuse' ? 'refuse a cold send once' : 'warn only')}
+            {row(
+              'Cold writes',
+              `${ct.coldWrites} paid${ct.coldWrites > 0 ? `, ${usd(ct.paidUsd)}` : ''}`,
+              ct.coldWrites > 0 ? 'warning' : undefined,
+            )}
           </>
         )}
 
