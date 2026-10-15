@@ -69,4 +69,4 @@ const LIMIT_NAMES: Record<string, string> = {
 
 export const limitName = (kind: string): string => LIMIT_NAMES[kind] ?? kind.replace(/_/g, ' ')
 
-export const usd = (n: number): string => (n < 10 ? `$${n.toFixed(2)}` : `$${n.toFixed(1)}`)
+export const usd = (n: number): string => `$${n.toFixed(2)}`

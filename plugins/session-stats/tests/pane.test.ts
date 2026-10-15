@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { bar, duration, hitRate, tokens } from '../hooks/format'
+import { bar, duration, hitRate, tokens, usd } from '../hooks/format'
 
 const PANE = {
   title: 'Session stats',
@@ -22,6 +22,8 @@ describe('format', () => {
     expect(bar(50, 10)).toBe('█████░░░░░')
     expect(hitRate({ input: 10, cacheRead: 90, cacheWrite: 0 })).toBe(90)
     expect(hitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBe(null)
+    expect(usd(75.8)).toBe('$75.80')
+    expect(usd(2.281)).toBe('$2.28')
   })
 })
 
