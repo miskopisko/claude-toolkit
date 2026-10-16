@@ -240,6 +240,6 @@ export async function openInBrowser($: EngineInterface, root: string, kind: 'pr'
   try {
     await gh($, root, [kind, 'view', String(number), '--web'])
   } catch {
-    // No gh: the pane's link still opens it.
+    // No gh: nothing to open it with; the pane already says gh is missing.
   }
 }

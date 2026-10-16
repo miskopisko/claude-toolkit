@@ -210,6 +210,8 @@ function startTicker($: EngineInterface) {
     const at = await $.clock.now()
     await update($, now, () => at)
     await refreshGit($)
+    // The config is re-read too, so an edit to it shows without a refresh.
+    rt.config = await loadConfig($, await placeOf($))
     await probeServices($)
     if (at - lastWorkAt >= WORK_EVERY_MS) {
       lastWorkAt = at
@@ -400,7 +402,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     startTicker($)
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const [g, w, s, prev, tickAt] = await Promise.all([read($, git), read($, work), read($, stack), read($, previous), read($, now)])
     const at = Math.max(tickAt, await $.clock.now())
     const cols = Math.max(24, e.props.bodyColumns - GUTTER)
@@ -485,7 +487,7 @@ export const register: Register = on => {
           ) : (
             <>
               <Box>
-                <Link href={issue.url} label={`#${issue.number}`} />
+                <Button key="issue-number" plain label={`#${issue.number}`} onPress={() => openInBrowser($, root!, 'issue', issue.number)} />
                 <Text wrap="truncate-end"> {issue.title}</Text>
               </Box>
               <Text dimColor wrap="truncate-end">
@@ -523,7 +525,7 @@ export const register: Register = on => {
           ) : (
             <>
               <Box>
-                <Link href={pr.url} label={`#${pr.number}`} />
+                <Button key="pr-number" plain label={`#${pr.number}`} onPress={() => openInBrowser($, root!, 'pr', pr.number)} />
                 <Text wrap="truncate-end"> {pr.title}</Text>
               </Box>
               {row(
@@ -589,11 +591,11 @@ export const register: Register = on => {
 
         {root !== null && (
           <Box marginTop={1}>
-            <Box width={10} flexShrink={0}>
+            <Box marginRight={3} flexShrink={0}>
               <Button key="refresh" plain hotkey="r" label="refresh" onPress={() => Promise.all([refreshGit($), refreshWork($), loadStack($)])} />
             </Box>
             {issue !== null && (
-              <Box width={9} flexShrink={0}>
+              <Box marginRight={3} flexShrink={0}>
                 <Button key="open-issue" plain hotkey="i" label="issue" onPress={() => openInBrowser($, root, 'issue', issue.number)} />
               </Box>
             )}
