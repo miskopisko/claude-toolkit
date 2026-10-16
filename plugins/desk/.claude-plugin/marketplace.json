@@ -1,0 +1,5 @@
+{
+  "name": "miskopisko-desk",
+  "owner": { "name": "Michael Piskuric" },
+  "plugins": [{ "name": "desk", "source": "./" }]
+}
