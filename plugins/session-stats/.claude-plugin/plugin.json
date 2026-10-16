@@ -2,5 +2,11 @@
   "name": "session-stats",
   "version": "0.3.0",
   "description": "A live side pane of session stats (model, tokens, prompt cache and its savings, usage limits, cost and burn rate, tools, agents), threshold alerts, a done notification, clickable controls, and cache-tax's keepwarm and cold-send guard. /session-stats opens it.",
+  "author": {
+    "name": "Michael Piskuric"
+  },
+  "homepage": "https://github.com/miskopisko/claude-plugins/tree/main/plugins/session-stats",
+  "repository": "https://github.com/miskopisko/claude-plugins",
+  "license": "MIT",
   "types": "./types/index.d.ts"
 }

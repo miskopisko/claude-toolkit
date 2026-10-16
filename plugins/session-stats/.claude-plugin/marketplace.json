@@ -1,5 +1,0 @@
-{
-  "name": "miskopisko",
-  "owner": { "name": "Michael Piskuric" },
-  "plugins": [{ "name": "session-stats", "source": "./" }]
-}

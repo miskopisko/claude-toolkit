@@ -1,0 +1,19 @@
+{
+  "name": "miskopisko",
+  "owner": { "name": "Michael Piskuric" },
+  "metadata": {
+    "description": "Claude Code plugins by Michael Piskuric: side panes and tools for day-to-day work in Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "desk",
+      "source": "./plugins/desk",
+      "description": "A work pane for the branch you're on: its GitHub issue and acceptance criteria, its PR's checks and reviews, your local dev services, and a where-you-left-off note."
+    },
+    {
+      "name": "session-stats",
+      "source": "./plugins/session-stats",
+      "description": "A live pane of session stats (tokens, prompt cache, usage limits, cost, tools, agents) with alerts, a done notification, and cache-tax's keepwarm and cold-send guard."
+    }
+  ]
+}

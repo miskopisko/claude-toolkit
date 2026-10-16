@@ -1,5 +1,7 @@
 # session-stats
 
+Part of [claude-plugins](../../README.md). See there for every plugin and how to add the marketplace.
+
 A Claude Code side pane with live stats for the current session. In fullscreen
 mode it docks on the right of the transcript.
 
@@ -39,11 +41,12 @@ installed separately, uninstall it so the guard doesn't run twice.
 
 At the Claude Code prompt:
 
-    /plugin install session-stats --marketplace miskopisko/claude-session-stats
+    /plugin marketplace add miskopisko/claude-plugins
+    /plugin install session-stats@miskopisko
 
 From a shell:
 
-    claude plugin install session-stats --marketplace miskopisko/claude-session-stats
+    claude plugin install session-stats --marketplace miskopisko/claude-plugins
 
 ## Use
 
