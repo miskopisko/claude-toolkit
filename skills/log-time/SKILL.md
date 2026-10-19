@@ -18,7 +18,7 @@ All personal settings live in `~/.config/log-time/config.json` (or `$XDG_CONFIG_
 
 ## 1. Work out the date and hours
 
-- **Date:** use the date from the arguments; with no date, use today. Resolve relative words with `date -d "<words>" +%F`. A bare weekday means its most recent past occurrence; if `date -d` returns a future date, subtract 7 days. Never log to a future date.
+- **Date:** use the date from the arguments; with no date, use today. Resolve relative words against today's date and weekday (`date "+%F %A"`). A bare weekday means its most recent past occurrence, never today or later. Never log to a future date.
 - **Hours:** use the number from the arguments ("6h", "6.5", "4 hours"); otherwise use `default_hours`.
 - If the date is a weekend or a statutory holiday in `holiday_region`, say so and ask before going on.
 
@@ -29,14 +29,14 @@ Call `list_time_entries` with `from` and `to` set to the date and `user_ids: [ha
 ## 3. Collect the day's activity
 
 Run `${CLAUDE_SKILL_DIR}/day-activity.sh <YYYY-MM-DD> <scan_roots...>`, quoting each root. It fetches each repo, then lists:
-- the commits the user authored that day (matched on their global git `user.email` and `user.name`)
+- the commits the user authored that day (matched on their git `user.email` and `user.name`, both the global ones and any set in each repo)
 - for GitHub repos, the PRs they're involved in that were open that day, with their linked issues
 
 Turn this into **tickets**:
-- Get the ticket number from the PR title, the branch name (`implement/284-…`, `bugfix/5246-…`) or the commit message (`#283`, `AB#5246`).
+- Get the ticket number from the PR title, the branch name (`feature/412-…`, `fix/398-…`, `PROJ-123-…`) or the commit message (`#412`, `PROJ-123`, `AB#398`).
 - Match commits to PRs by subject or branch. Name each ticket by its issue title (for GitHub: `gh issue view <n> --json title` run in the repo) or else by its PR title.
 - Drop PRs that had no commits, merges or reviews from the user that day. A PR that was merely open is not work.
-- Merges into `dev` or `main` count as part of the ticket they merged, not as a ticket of their own.
+- Merges into a shared branch (such as `main` or `develop`) count as part of the ticket they merged, not as a ticket of their own.
 - Ignore repos whose matching rule says `skip`.
 
 Then ask one short question: **"Anything else today that isn't in git, such as meetings, support or investigations?"** The user can answer "no". Add what they list as extra note lines.

@@ -23,7 +23,7 @@ You can also just ask Claude to "log my time for today".
 Then:
 
 1. Connect the **Harvest** connector in Claude Code (`/mcp`).
-2. Make sure `git config --global user.email` is set. To get PR and issue titles, install [`gh`](https://cli.github.com/) and run `gh auth login`.
+2. Make sure your git email is set (`git config --global user.email`, or per repo). To get PR and issue titles, install [`gh`](https://cli.github.com/) and run `gh auth login`.
 3. Run `/log-time:log-time setup`. It finds your Harvest user, the folders your repos live in, and which Harvest project each repo bills to, then asks you to confirm. If you skip this, it runs on first use.
 
 ## Your settings
@@ -50,4 +50,4 @@ When it finds work in a repo with no rule, it asks where that repo bills and sav
 
 ## Requirements
 
-`bash`, `git`, GNU `date` and `timeout` (on macOS, install `coreutils`), and optionally `gh`.
+`bash` and `git`, on Linux or macOS, and optionally `gh`.

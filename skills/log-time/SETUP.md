@@ -2,7 +2,7 @@
 
 The goal is a config file at `${XDG_CONFIG_HOME:-$HOME/.config}/log-time/config.json`, shaped like `config.example.json` in this skill folder. Do the lookups yourself and ask the user only to confirm or fill gaps. If a config already exists (re-running `setup`), start from its values and show what changes.
 
-1. **Prerequisites.** Check that `git config --global user.email` is set and that the Harvest tools respond. If `gh` isn't installed or `gh auth status` fails, say that GitHub PRs and issue titles will be missing until it's set up, and go on.
+1. **Prerequisites.** Check that `git config user.email` is set (globally, or in the repos you work in) and that the Harvest tools respond. If `gh` isn't installed or `gh auth status` fails, say that GitHub PRs and issue titles will be missing until it's set up, and go on.
 
 2. **Harvest user.** Call `list_users` with `search` set to the git email. If exactly one user matches, use their id. Otherwise show the candidates and ask.
 
