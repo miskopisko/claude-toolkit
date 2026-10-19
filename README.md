@@ -1,31 +1,39 @@
-# claude-plugins
+# claude-toolkit
 
-[Claude Code](https://claude.com/claude-code) plugins by
+[Claude Code](https://claude.com/claude-code) skills and plugins by
 [@miskopisko](https://github.com/miskopisko), in one repository that is also a
-plugin marketplace. Add the marketplace once, then install whichever plugins
-you want.
+plugin marketplace. Add the marketplace once, then install whichever ones you
+want.
 
-## Plugins
+## What's here
+
+**Plugins** add panes, commands and hooks to Claude Code itself.
 
 | Plugin | What it does |
 | --- | --- |
 | [desk](plugins/desk) | A side pane for the branch you're on: its GitHub issue and acceptance criteria, its PR's checks, review and open threads, your local dev services (`/stack`), and a where-you-left-off note at each session start. |
 | [session-stats](plugins/session-stats) | A live side pane of session stats: model, tokens, prompt cache and its savings, usage limits, cost and burn rate, tools and agents. Adds threshold alerts, a done notification, and [cache-tax](https://github.com/karanb192/cache-tax)'s keepwarm and cold-send guard. |
 
-Each plugin's README covers what it shows, its commands and its settings.
+**Skills** teach Claude a task. Each one installs as a plugin of its own.
+
+| Skill | What it does |
+| --- | --- |
+| [log-time](skills/log-time) | Logs a day's work to Harvest from the tickets in your git commits and GitHub PRs. |
+
+Each one's README covers what it does, its commands and its settings.
 
 ## Install
 
-At the Claude Code prompt, add the marketplace, then install a plugin by name:
+At the Claude Code prompt, add the marketplace, then install by name:
 
-    /plugin marketplace add miskopisko/claude-plugins
+    /plugin marketplace add miskopisko/claude-toolkit
     /plugin install desk@miskopisko
     /plugin install session-stats@miskopisko
+    /plugin install log-time@miskopisko
 
-Or from a shell, in one step per plugin:
+Or from a shell, in one step each:
 
-    claude plugin install desk --marketplace miskopisko/claude-plugins
-    claude plugin install session-stats --marketplace miskopisko/claude-plugins
+    claude plugin install desk --marketplace miskopisko/claude-toolkit
 
 To pick up new versions later:
 
@@ -33,10 +41,14 @@ To pick up new versions later:
 
 `/plugin` with no arguments opens a browser of everything in the marketplace.
 
+A skill from an installed plugin runs as `/<plugin>:<skill>`, for example
+`/log-time:log-time`, or Claude picks it up when you ask for that task.
+
 ## Your data and credentials
 
-No plugin here ships with credentials, accounts, or anyone's personal
-settings, and none sends data to a third-party service.
+Nothing here ships with credentials, accounts, or anyone's personal settings,
+and nothing sends data to a third-party service you haven't connected
+yourself.
 
 - **desk** reads GitHub through your own [gh CLI](https://cli.github.com)
   login (`gh auth login`), so it never sees or stores a token. Per-project
@@ -44,20 +56,18 @@ settings, and none sends data to a third-party service.
   of them until you approve them with `/stack trust`.
 - **session-stats** needs nothing set up. Its numbers come from Claude Code
   itself.
+- **log-time** talks to Harvest through the Harvest connector you connect in
+  Claude Code, and keeps your settings in `~/.config/log-time/`.
 
-Anything a plugin remembers (settings, the last GitHub read, your last prompts
-per repository) is kept in Claude Code's per-plugin store under your own
-Claude Code configuration directory, and stays on your machine.
-
-If a plugin added here later needs a key or an account, it must ask for it on
-install or first use and keep it in that store or in your OS keychain, never
-in this repository.
+Plugins keep what they remember in Claude Code's per-plugin store under your
+own Claude Code configuration directory. Skills keep settings in
+`~/.config/<skill>/`. Either way it stays on your machine.
 
 ## Layout
 
 ```
 .claude-plugin/
-  marketplace.json      the marketplace: lists every plugin and where it lives
+  marketplace.json      the marketplace: lists every plugin and skill and where it lives
 plugins/
   <name>/
     .claude-plugin/
@@ -66,7 +76,16 @@ plugins/
     tests/              tests, run with `claude plugin test .`
     types/              types for the plugin's state
     README.md           what it does and how to use it
+skills/
+  <name>/
+    SKILL.md            the skill
+    README.md           what it does and how to use it
+    …                   any scripts or reference files it uses
 ```
+
+A skill has no `plugin.json`. Its entry in `marketplace.json` (with
+`"strict": false`) carries its version and details, so the skill folder stays
+a plain skill folder that also works copied into `~/.claude/skills`.
 
 ## Develop
 
@@ -90,22 +109,49 @@ To try a local change, install from your checkout instead of GitHub:
    `version`, `description`, `author`, `license`) and a `README.md`.
 2. Add an entry to `.claude-plugin/marketplace.json`:
    `{ "name": "<name>", "source": "./plugins/<name>", "description": "…" }`.
-3. Add a row to the table above.
+3. Add a row to the plugins table above.
 4. Run `claude plugin validate .` at the root and in the plugin folder, and
    `claude plugin test .` in the plugin folder.
-5. Bump a plugin's `version` in its `plugin.json` whenever you change it, so
-   `/plugin marketplace update` delivers it.
+
+### Adding a skill
+
+1. Create `skills/<name>/` with a `SKILL.md` (frontmatter `name` and
+   `description`) and a `README.md`. Use the same `<name>` for the folder,
+   the frontmatter and the marketplace entry.
+2. In `SKILL.md`, refer to bundled files as `${CLAUDE_SKILL_DIR}/<file>`, so
+   the skill works both installed and linked into `~/.claude/skills`.
+3. Keep anything personal (ids, paths, tokens) out of the repository. Have the
+   skill read it from `~/.config/<name>/` and create that on first run, with a
+   `config.example.json` beside `SKILL.md` to show the shape.
+4. Add an entry to `.claude-plugin/marketplace.json`:
+   ```json
+   { "name": "<name>", "source": "./skills/<name>", "strict": false, "skills": ["./"],
+     "version": "0.1.0", "description": "…" }
+   ```
+5. Add a row to the skills table above and run `claude plugin validate .`.
+
+To edit a skill you use every day and see changes at once, link it into your
+personal skills instead of installing it (don't do both, or you'll have two
+copies):
+
+    ln -s "$PWD/skills/<name>" ~/.claude/skills/<name>
+
+### Releasing
+
+Bump the `version` whenever you change something (in `plugin.json` for a
+plugin, in its `marketplace.json` entry for a skill). Users get a change only
+when the version moves, so commits in between are safe to push.
 
 Before committing, check that nothing personal went in: no tokens, no
 absolute paths from your machine, no hard-coded user names, emails or
-organization names. A plugin that needs any of these asks for them at first
-use.
+organization names.
 
 ## History
 
 desk and session-stats each started in a repository of their own
-(`miskopisko/claude-desk` and `miskopisko/claude-session-stats`). Their
-commit history was carried over here, under `plugins/<name>/`.
+(`miskopisko/claude-desk` and `miskopisko/claude-session-stats`), and log-time
+in `miskopisko/claude-skills`. This repository was called `claude-plugins`
+until the skills moved in.
 
 ## License
 

@@ -1,8 +1,8 @@
 {
   "name": "miskopisko",
-  "owner": { "name": "Michael Piskuric" },
+  "owner": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
   "metadata": {
-    "description": "Claude Code plugins by Michael Piskuric: side panes and tools for day-to-day work in Claude Code."
+    "description": "Claude Code skills and plugins for day-to-day dev work: side panes, session stats, and time tracking."
   },
   "plugins": [
     {
@@ -14,6 +14,20 @@
       "name": "session-stats",
       "source": "./plugins/session-stats",
       "description": "A live pane of session stats (tokens, prompt cache, usage limits, cost, tools, agents) with alerts, a done notification, and cache-tax's keepwarm and cold-send guard."
+    },
+    {
+      "name": "log-time",
+      "source": "./skills/log-time",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Log a day's work to Harvest from the tickets in your git commits and GitHub PRs.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/log-time",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["harvest", "time-tracking", "git", "github"]
     }
   ]
 }

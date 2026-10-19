@@ -1,0 +1,11 @@
+{
+  "harvest_user_id": 1234567,
+  "default_hours": 8,
+  "holiday_region": "Canada",
+  "scan_roots": ["~/code"],
+  "repos": [
+    { "match": "~/code/client-a/*", "project_id": 11111111, "project": "Client A - Platform", "task_id": 22222222, "task": "Development" },
+    { "match": "~/code/client-b-api", "project_id": 33333333, "project": "Client B - Support", "task_id": 22222222, "task": "Development" },
+    { "match": "~/code/my-side-project", "skip": true }
+  ]
+}

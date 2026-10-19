@@ -5,8 +5,8 @@
   "author": {
     "name": "Michael Piskuric"
   },
-  "homepage": "https://github.com/miskopisko/claude-plugins/tree/main/plugins/desk",
-  "repository": "https://github.com/miskopisko/claude-plugins",
+  "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/plugins/desk",
+  "repository": "https://github.com/miskopisko/claude-toolkit",
   "license": "MIT",
   "types": "./types/index.d.ts"
 }

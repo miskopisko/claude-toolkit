@@ -1,6 +1,6 @@
 # desk
 
-Part of [claude-plugins](../../README.md). See there for every plugin and how to add the marketplace.
+Part of [claude-toolkit](../../README.md). See there for every plugin and how to add the marketplace.
 
 A Claude Code side pane for the work on your current branch. In fullscreen
 mode it docks on the right of the transcript.
@@ -43,12 +43,12 @@ prompt and isn't repeated. `/desk note off` turns it off.
 
 At the Claude Code prompt:
 
-    /plugin marketplace add miskopisko/claude-plugins
+    /plugin marketplace add miskopisko/claude-toolkit
     /plugin install desk@miskopisko
 
 From a shell:
 
-    claude plugin install desk --marketplace miskopisko/claude-plugins
+    claude plugin install desk --marketplace miskopisko/claude-toolkit
 
 desk reads GitHub through the [gh CLI](https://cli.github.com), so install it
 and run `gh auth login`. Project board columns need the `project` scope:
