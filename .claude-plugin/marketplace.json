@@ -2,7 +2,7 @@
   "name": "miskopisko",
   "owner": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
   "metadata": {
-    "description": "Claude Code skills and plugins for day-to-day dev work: side panes, session stats, and time tracking."
+    "description": "Claude Code skills and plugins for day-to-day dev work: side panes, session stats, time tracking and manual test plans."
   },
   "plugins": [
     {
@@ -28,6 +28,20 @@
       "license": "MIT",
       "category": "productivity",
       "keywords": ["harvest", "time-tracking", "git", "github"]
+    },
+    {
+      "name": "manual-test-plan",
+      "source": "./skills/manual-test-plan",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Build a manual test plan for the ticket you're on, as a web page to tick through: cases written from the spec, not the code, with real records from your local database.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/manual-test-plan",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "testing",
+      "keywords": ["testing", "manual-testing", "qa", "test-plan"]
     }
   ]
 }

@@ -19,6 +19,7 @@ want.
 | Skill | What it does |
 | --- | --- |
 | [log-time](skills/log-time) | Logs a day's work to Harvest from the tickets in your git commits and GitHub PRs. |
+| [manual-test-plan](skills/manual-test-plan) | Builds a manual test plan for the ticket you're on, as a web page to tick through: cases written from the spec, not the code, with real records from your local database. |
 
 Each one's README covers what it does, its commands and its settings.
 

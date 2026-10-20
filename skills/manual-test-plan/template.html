@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual Test Plan</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #eef0f4;
+    --border: #d9dde5;
+    --text: #1b1f27;
+    --muted: #5d6573;
+    --accent: #2f5fd0;
+    --strong: #000000;
+    --pass: #1f8a50;
+    --pass-bg: rgba(31, 138, 80, 0.10);
+    --fail: #c8382f;
+    --fail-bg: rgba(200, 56, 47, 0.09);
+    --warn: #a86b00;
+    --code-bg: #f1f3f6;
+    --header-bg: rgba(246, 247, 249, 0.94);
+    --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1e222b;
+      --border: #2a2f3a;
+      --text: #e6e8ec;
+      --muted: #9aa1ad;
+      --accent: #7aa2f7;
+      --strong: #ffffff;
+      --pass: #4fbf7f;
+      --pass-bg: rgba(79, 191, 127, 0.12);
+      --fail: #f2706b;
+      --fail-bg: rgba(242, 112, 107, 0.12);
+      --warn: #e0b45a;
+      --code-bg: #0b0d11;
+      --header-bg: rgba(15, 17, 21, 0.94);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 var(--sans);
+  }
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--header-bg);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px 12px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  h1 small { color: var(--muted); font-weight: 400; }
+  .bar { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+  .progress { flex: 1; min-width: 180px; height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; display: flex; }
+  .progress span { display: block; height: 100%; transition: width .2s; }
+  .progress .p { background: var(--pass); }
+  .progress .f { background: var(--fail); }
+  .counts { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .counts b.p { color: var(--pass); } .counts b.f { color: var(--fail); }
+  button {
+    font: inherit; font-size: 13px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  main { padding: 16px; }
+  .facts {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; font-size: 14px; margin: 0 0 18px;
+  }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .facts ul { margin: 0; padding-left: 18px; }
+  .facts li { display: list-item; padding: 0; border: 0; }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 14px; overflow: hidden;
+  }
+  section > h2 {
+    margin: 0; padding: 10px 14px; font-size: 15px; font-weight: 600;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+  }
+  section > h2 .tally { font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  section.done > h2 .tally { color: var(--pass); }
+  section.hasfail > h2 .tally { color: var(--fail); }
+  section.questions > h2 { color: var(--warn); }
+  .intro { padding: 10px 14px 0; color: var(--muted); font-size: 14px; margin: 0; }
+  ol { list-style: none; margin: 0; padding: 6px 0; }
+  li { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 14px; border-top: 1px solid transparent; }
+  li + li { border-top-color: var(--panel-2); }
+  li.pass { background: var(--pass-bg); }
+  li.fail { background: var(--fail-bg); }
+  li.did .text { color: var(--muted); }
+  .ctl { display: flex; gap: 4px; align-items: flex-start; padding-top: 1px; }
+  .ctl button { width: 28px; height: 26px; padding: 0; font-size: 14px; line-height: 1; }
+  .ctl .ok[aria-pressed="true"] { background: var(--pass); border-color: var(--pass); color: var(--bg); }
+  .ctl .no[aria-pressed="true"] { background: var(--fail); border-color: var(--fail); color: var(--bg); }
+  .ctl .do[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .kind { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 2px; }
+  .kind.check { color: var(--warn); }
+  .kind.question { color: var(--warn); }
+  code, .val { font-family: var(--mono); font-size: 13px; }
+  code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .val { color: var(--strong); font-weight: 600; }
+  .snippet { position: relative; margin-top: 6px; }
+  .snippet pre {
+    margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 64px 8px 10px; font: 13px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all;
+  }
+  .snippet .label { color: var(--muted); }
+  .snippet button { position: absolute; top: 5px; right: 5px; font-size: 12px; padding: 2px 8px; }
+  textarea.notes {
+    display: block; width: calc(100% - 28px); margin: 4px 14px 12px; min-height: 38px; resize: vertical;
+    background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    font: 13px/1.4 var(--sans); padding: 6px 8px;
+  }
+  textarea.notes::placeholder { color: var(--muted); }
+  a { color: var(--accent); }
+  .error { background: var(--fail-bg); border: 1px solid var(--fail); border-radius: 10px; padding: 12px 14px; }
+  .toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 12px; font-size: 13px; opacity: 0; transition: opacity .15s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  @media (max-width: 560px) {
+    li { grid-template-columns: 1fr; }
+    .facts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1 id="title">Manual test plan</h1>
+    <div class="bar">
+      <div class="progress" aria-hidden="true"><span class="p" id="pbar"></span><span class="f" id="fbar"></span></div>
+      <div class="counts" id="counts"></div>
+      <button id="export" title="Copy a plain-text summary of results and notes">Copy results</button>
+      <button id="reset">Reset</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <dl class="facts" id="facts"></dl>
+  <div id="sections"></div>
+</main>
+<div class="toast" id="toast">Copied</div>
+
+<script type="application/json" id="plan">
+__PLAN_JSON__
+</script>
+<script>
+const esc = (s) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Plan text is plain text with a little markup: `code`, **bold**, [[value]],
+// ~~struck~~ and [label](url). Everything else is escaped.
+function md(s) {
+  return String(s ?? '').split(/(`[^`]+`)/).map((part) =>
+    part.length > 1 && part.startsWith('`') && part.endsWith('`')
+      ? `<code>${esc(part.slice(1, -1))}</code>`
+      : esc(part)
+          .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+          .replace(/\[\[(.+?)\]\]/g, '<span class="val">$1</span>')
+          .replace(/~~(.+?)~~/g, '<s>$1</s>')
+          .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
+            /^(https?:\/\/|[\w.-]+\.html(#[\w-]*)?$|[\w.-]+\.http$)/.test(url)
+              ? `<a href="${url}" target="_blank" rel="noopener">${label}</a>` : m)
+  ).join('');
+}
+const plain = (s) => { const d = document.createElement('div'); d.innerHTML = md(s); return d.textContent; };
+
+let PLAN;
+try { PLAN = JSON.parse(document.getElementById('plan').textContent); }
+catch (err) {
+  document.getElementById('sections').innerHTML = `<p class="error">This page's plan could not be read: ${esc(err.message)}</p>`;
+  throw err;
+}
+
+const SECTIONS = (PLAN.sections || []).slice();
+if ((PLAN.questions || []).length) {
+  SECTIONS.unshift({
+    id: 'questions', title: 'Questions for the spec', cls: 'questions',
+    intro: 'Gaps or disagreements found while writing this plan. Settle them before trusting a check that depends on them.',
+    items: PLAN.questions.map((q) => ({ kind: 'question', text: q })),
+  });
+}
+const label = `${PLAN.ticket ? PLAN.ticket + ' ' : ''}${PLAN.title || 'Manual test plan'}`;
+document.title = PLAN.ticket ? `${PLAN.ticket} Test Plan` : 'Manual Test Plan';
+document.getElementById('title').innerHTML =
+  `${PLAN.url ? `<a href="${esc(PLAN.url)}" target="_blank" rel="noopener">${esc(PLAN.ticket || '')}</a> ` : esc(PLAN.ticket ? PLAN.ticket + ' ' : '')}${esc(PLAN.title || 'Manual test plan')}` +
+  ` <small>· manual test plan${PLAN.environment ? ' on ' + esc(PLAN.environment) : ''}</small>`;
+
+function renderFacts() {
+  const rows = [];
+  if (PLAN.summary) rows.push(['Change', md(PLAN.summary)]);
+  (PLAN.facts || []).forEach((f) => rows.push([esc(f.label), md(f.text)]));
+  if ((PLAN.related || []).length) {
+    rows.push(['See also', PLAN.related.map((r) => md(`[${r.label}](${r.href})`)).join(' · ')]);
+  }
+  if ((PLAN.sources || []).length) {
+    rows.push(['Built from', `<ul>${PLAN.sources.map((s) => `<li>${md(s)}</li>`).join('')}</ul>`]);
+  }
+  if (PLAN.generated) rows.push(['Generated', esc(PLAN.generated)]);
+  rows.push(['Legend', '<b>●</b> marks a step done · <b>✓</b>/<b>✗</b> records a check’s pass or fail · <b>●</b> on a question marks it settled. Ticks and notes are kept in this browser.']);
+  document.getElementById('facts').innerHTML = rows.map(([dt, dd]) => `<dt>${dt}</dt><dd>${dd}</dd>`).join('');
+}
+
+const KEY = `manual-test-plan:${PLAN.key || location.pathname}`;
+let state = { marks: {}, notes: {} };
+try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (_) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {} };
+
+const host = document.getElementById('sections');
+const isCheck = (it) => it.kind === 'check';
+const kindLabel = { step: 'Step', check: 'Check', question: 'Question' };
+
+function render() {
+  host.innerHTML = '';
+  SECTIONS.forEach((sec) => {
+    const el = document.createElement('section');
+    el.id = sec.id;
+    if (sec.cls) el.className = sec.cls;
+    el.innerHTML = `<h2><span>${md(sec.title)}</span><span class="tally"></span></h2>` +
+      (sec.intro ? `<p class="intro">${md(sec.intro)}</p>` : '');
+    const ol = document.createElement('ol');
+    (sec.items || []).forEach((it, i) => {
+      const li = document.createElement('li');
+      li.dataset.id = `${sec.id}.${i}`;
+      const ctl = isCheck(it)
+        ? `<button class="ok" title="Pass" aria-label="Pass">✓</button><button class="no" title="Fail" aria-label="Fail">✗</button>`
+        : `<button class="do" title="${it.kind === 'question' ? 'Settled' : 'Done'}" aria-label="Mark done">●</button>`;
+      const snip = it.snippet
+        ? `<div class="snippet"><pre>${it.snippet.label ? `<span class="label">${esc(it.snippet.label)}</span>\n` : ''}${esc(it.snippet.text)}</pre><button data-copy="${encodeURIComponent(it.snippet.text)}">Copy</button></div>`
+        : '';
+      const kind = kindLabel[it.kind] ? it.kind : 'step';
+      li.innerHTML = `<div class="ctl">${ctl}</div><div class="text"><span class="kind ${kind}">${kindLabel[kind]}</span>${md(it.text)}${snip}</div>`;
+      ol.appendChild(li);
+    });
+    el.appendChild(ol);
+    const notes = document.createElement('textarea');
+    notes.className = 'notes';
+    notes.placeholder = sec.id === 'questions' ? 'Answers…' : 'Notes for this section…';
+    notes.value = state.notes[sec.id] || '';
+    notes.addEventListener('input', () => { state.notes[sec.id] = notes.value; save(); });
+    el.appendChild(notes);
+    host.appendChild(el);
+  });
+  refresh();
+}
+
+function refresh() {
+  let pass = 0, fail = 0, checks = 0, steps = 0, did = 0;
+  document.querySelectorAll('li').forEach((li) => {
+    const m = state.marks[li.dataset.id];
+    li.classList.toggle('pass', m === 'pass');
+    li.classList.toggle('fail', m === 'fail');
+    li.classList.toggle('did', m === 'done');
+    li.querySelectorAll('.ctl button').forEach((b) => {
+      const want = b.classList.contains('ok') ? 'pass' : b.classList.contains('no') ? 'fail' : 'done';
+      b.setAttribute('aria-pressed', String(m === want));
+    });
+  });
+  SECTIONS.forEach((sec) => {
+    let sc = 0, sp = 0, sf = 0, ss = 0, sd = 0;
+    (sec.items || []).forEach((it, i) => {
+      const m = state.marks[`${sec.id}.${i}`];
+      if (isCheck(it)) { sc++; if (m === 'pass') sp++; if (m === 'fail') sf++; }
+      else { ss++; if (m === 'done') sd++; }
+    });
+    if (sec.id !== 'questions') { checks += sc; pass += sp; fail += sf; steps += ss; did += sd; }
+    const el = document.getElementById(sec.id);
+    const parts = [];
+    if (sc) parts.push(`${sp + sf}/${sc} checked` + (sf ? ` · ${sf} failed` : ''));
+    if (ss) parts.push(sec.id === 'questions' ? `${sd}/${ss} settled` : `${sd}/${ss} steps`);
+    el.querySelector('.tally').textContent = parts.join(' · ');
+    el.classList.toggle('done', sc + ss > 0 && sp === sc && sd === ss);
+    el.classList.toggle('hasfail', sf > 0);
+  });
+  document.getElementById('pbar').style.width = checks ? `${(pass / checks) * 100}%` : '0';
+  document.getElementById('fbar').style.width = checks ? `${(fail / checks) * 100}%` : '0';
+  document.getElementById('counts').innerHTML =
+    `<b class="p">${pass} passed</b> · <b class="f">${fail} failed</b> · ${checks - pass - fail} to check · ${did}/${steps} steps`;
+}
+
+host.addEventListener('click', (e) => {
+  const copy = e.target.closest('button[data-copy]');
+  if (copy) { copyText(decodeURIComponent(copy.dataset.copy)); return; }
+  const b = e.target.closest('.ctl button');
+  if (!b) return;
+  const id = b.closest('li').dataset.id;
+  const want = b.classList.contains('ok') ? 'pass' : b.classList.contains('no') ? 'fail' : 'done';
+  if (state.marks[id] === want) delete state.marks[id]; else state.marks[id] = want;
+  save(); refresh();
+});
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 1200);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+  }
+  toast('Copied');
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  if (!window.confirm('Clear every tick and note?')) return;
+  state = { marks: {}, notes: {} }; save(); render();
+});
+
+document.getElementById('export').addEventListener('click', () => {
+  const lines = [`${label}: manual test results`];
+  SECTIONS.forEach((sec) => {
+    lines.push('', plain(sec.title));
+    (sec.items || []).forEach((it, i) => {
+      const m = state.marks[`${sec.id}.${i}`];
+      if (isCheck(it)) lines.push(`  [${m === 'pass' ? 'PASS' : m === 'fail' ? 'FAIL' : '    '}] ${plain(it.text)}`);
+      else if (it.kind === 'question') lines.push(`  [${m === 'done' ? 'SETTLED' : 'OPEN'}] ${plain(it.text)}`);
+    });
+    if (state.notes[sec.id]) lines.push(`  Notes: ${state.notes[sec.id]}`);
+  });
+  copyText(lines.join('\n'));
+});
+
+renderFacts();
+render();
+</script>
+</body>
+</html>
