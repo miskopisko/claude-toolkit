@@ -9,10 +9,12 @@ Usage from a skill script:  from workflow import load;  cfg = load()
 """
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 DEFAULTS = {
     "repo": None,               # owner/name; default: the gh repo of this checkout
+    "remote": "origin",         # the git remote for the shared repo (in a fork, often "upstream")
     "trunk": None,              # the branch tickets branch from and PR into; default: the repo's default branch
     "branchPrefix": "feature/", # ticket branches are <branchPrefix><n>-<slug>
     "legacyBranches": [],       # glob patterns of long-lived branches still being finished, e.g. "epic/*"
@@ -42,6 +44,8 @@ def _read(path):
         return json.loads(path.read_text())
     except FileNotFoundError:
         return {}
+    except json.JSONDecodeError as e:
+        sys.exit(f"{path}: not valid JSON ({e})")
 
 
 def _merge(base, over):
@@ -56,11 +60,18 @@ def load():
     cfg = DEFAULTS
     for name in ("workflow.json", "workflow.local.json"):
         cfg = _merge(cfg, _read(top / ".claude" / name))
+    remote = cfg["remote"]
     if not cfg["repo"]:
-        cfg["repo"] = _run("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner") or None
+        # The shared repo is the one `remote` points at, which in a fork isn't gh's default.
+        url = _run("git", "remote", "get-url", remote)
+        cfg["repo"] = _run("gh", "repo", "view", url, "--json", "nameWithOwner", "-q", ".nameWithOwner") \
+            if url else None
+        cfg["repo"] = cfg["repo"] or None
     if not cfg["trunk"]:
-        cfg["trunk"] = _run("gh", "repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name") \
-            or _run("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix("origin/") or "main"
+        view = ["gh", "repo", "view"] + ([cfg["repo"]] if cfg["repo"] else [])
+        cfg["trunk"] = _run(*view, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name") \
+            or _run("git", "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").removeprefix(f"{remote}/") \
+            or "main"
     return cfg
 
 

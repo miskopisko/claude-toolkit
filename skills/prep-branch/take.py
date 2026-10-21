@@ -31,9 +31,11 @@ def main():
     repo = cfg["repo"]
     if "--repo" in args:
         i = args.index("--repo")
+        if i + 1 >= len(args):
+            sys.exit("usage: take.py <ticket-number> [--repo owner/name] [--dry-run]")
         repo = args[i + 1]
         del args[i:i + 2]
-    if not args:
+    if len(args) != 1 or not args[0].lstrip("#").isdigit():
         sys.exit("usage: take.py <ticket-number> [--repo owner/name] [--dry-run]")
     if not repo:
         sys.exit("⛔ no repo: set `repo` in the workflow config or pass --repo")

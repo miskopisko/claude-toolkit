@@ -1,7 +1,7 @@
 ---
 name: commit-pr
 description: Commit the staged change and open a pull request against the trunk, in the repo's own commit and PR style, then move the tickets to In review (when a board is configured) and tick their met acceptance criteria. Use when the user has staged and gated their work and wants it committed and a PR raised.
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py), Bash(python3 ${CLAUDE_SKILL_DIR}/precheck.py*), Bash(python3 ${CLAUDE_SKILL_DIR}/board.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/tick.py *)
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py), Bash(python3 ${CLAUDE_SKILL_DIR}/precheck.py), Bash(python3 ${CLAUDE_SKILL_DIR}/precheck.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/board.py), Bash(python3 ${CLAUDE_SKILL_DIR}/board.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/tick.py), Bash(python3 ${CLAUDE_SKILL_DIR}/tick.py *)
 ---
 
 # Commit + PR
@@ -12,8 +12,10 @@ commit, push, open a PR, move its tickets to In review and tick their met criter
 **not** approval for a particular message, so there are two checkpoints below where you
 show the text and wait.
 
-`trunk`, `legacyBranches`, `board` and `rulesFile` come from the workflow config. See them
-with `python3 ${CLAUDE_SKILL_DIR}/workflow.py`. If `rulesFile` is set, read it first. Its
+`remote`, `trunk`, `legacyBranches`, `board` and `rulesFile` come from the workflow config.
+See them with `python3 ${CLAUDE_SKILL_DIR}/workflow.py`. `<remote>` below is the `remote`
+setting: the git remote for the shared repo, `origin` by default (in a fork, often
+`upstream`). If `rulesFile` is set, read it first. Its
 rules win over this skill's defaults wherever they differ, including the house style below.
 
 Hard rules:
@@ -42,7 +44,7 @@ Act on what it says:
 | --- | --- |
 | nothing staged | stop — the user stages |
 | on the trunk, `main`, `master` or a legacy branch | stop — cut a ticket branch (`/prep-branch`) |
-| behind the trunk | merge `origin/<trunk>` in first, then re-run |
+| behind the trunk | merge `<remote>/<trunk>` in first, then re-run |
 | carries a legacy branch not yet on the trunk | stop — the PR would bring its commits; ask the user |
 | **a PR is already open** | this is a follow-up commit: commit, push, and stop. Do not open a second PR. If it answers review findings, use `/pr-comments` |
 | unstaged/untracked listed | read them out and confirm each is deliberately excluded |
@@ -58,9 +60,13 @@ message carrying a `Verified:` trailer that nothing verified is worse than no tr
 Learn the house style, first source that has one:
 
 1. the rules file, if set;
-2. the recent subjects and trailers precheck printed from `origin/<trunk>` (read a few full
-   messages with `git log --no-merges -5 origin/<trunk>` if the bodies matter): prefix or
-   none (`feat:`), case, ticket numbers in the subject or not, body length, trailers in use;
+2. the recent subjects and trailers precheck printed from `<remote>/<trunk>` (read a few full
+   messages with `git log --no-merges -5 <remote>/<trunk>` if the bodies matter): prefix or
+   none (`feat:`), case, ticket numbers in the subject or not, body length, trailers in use.
+   They are evidence, not law: follow the pattern most of them share, and ignore throwaway
+   subjects ("fixes", "wip", "v2"). Lines marked `[PR]` are squash-merged PR
+   titles with their `(#n)` removed; they show the PR title style, not necessarily the
+   commit style;
 3. the default below.
 
 Default:
@@ -88,14 +94,14 @@ if any (such as a `Co-Authored-By:` trailer); don't invent one.
 
 ```bash
 git commit -F <message-file>      # never -a, never -m with a one-liner body
-git push                          # git push -u origin HEAD if precheck said first push
+git push                          # or the git push -u … HEAD precheck gave, on a first push
 ```
 
 ## 3. Draft the PR — then stop
 
 Learn the PR style the same way: the rules file; else the PR template precheck found
 (fill in its sections, don't replace them); else recent merged PRs
-(`gh pr list --state merged --base <trunk> --limit 5 --json title,body`); else the default
+(`gh pr list --repo <repo> --state merged --base <trunk> --limit 5 --json title,body`); else the default
 below.
 
 Default title: `<commit subject> (#<ticket>)`, listing both numbers if the branch covers two.
@@ -131,7 +137,7 @@ session, if any.
 **Show it and wait.** Then:
 
 ```bash
-gh pr create --base <trunk> --title "<title>" --body-file <body-file>
+gh pr create --repo <repo> --base <trunk> --title "<title>" --body-file <body-file>
 ```
 
 ## 4. Move the cards to In review
@@ -153,8 +159,8 @@ PR opened.
 ## 5. Tick the met acceptance criteria
 
 Also by default, straight after the board move (with or without a board). GitHub never ticks
-an issue's checkboxes itself, and the desk plugin counts them, so a done ticket would
-otherwise read 0 of n.
+an issue's checkboxes itself, so a done ticket would otherwise read 0 of n (in the optional
+desk plugin, for one).
 
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/tick.py <ticket> --list      # positions, as the issue has them
@@ -165,6 +171,10 @@ Tick only what `/gate`'s ACCEPTANCE section reported as ✅ met, by position. Le
 and ❌ not met unticked, and say which in the report. If the gate didn't run in this session,
 there is no verdict to act on: list the criteria and ask rather than tick from memory. Only
 the box characters change; a box already ticked stays ticked.
+
+The criteria are the `- [ ]` boxes under the first heading that mentions "Acceptance". If
+`tick.py` says the ticket has none, say so in the report and skip this step; don't add
+boxes to the issue.
 
 ## 6. Report
 

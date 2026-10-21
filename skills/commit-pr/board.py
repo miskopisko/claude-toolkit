@@ -78,7 +78,7 @@ def _graphql(query, **fields):
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode != 0:
         err = r.stderr.strip()
-        if "scope" in err.lower() or "project" in err.lower():
+        if "INSUFFICIENT_SCOPES" in err or "required scopes" in err.lower():
             err += "\n(GitHub Projects need the `project` scope: gh auth refresh -s project)"
         raise BoardError(f"gh api graphql failed:\n{err}")
     return json.loads(r.stdout)["data"]
@@ -162,9 +162,9 @@ def main():
     cfg = load()
     to = _take(args, "--to", "inReview")
     repo = _take(args, "--repo", cfg["repo"])
-    tickets = [int(a.lstrip("#")) for a in args]
-    if not tickets:
+    if not args or not all(a.lstrip("#").isdigit() for a in args):
         sys.exit('usage: board.py <ticket>... [--to inProgress|inReview|"<column>"] [--repo owner/name] [--dry-run]')
+    tickets = [int(a.lstrip("#")) for a in args]
     if not cfg.get("board") or not cfg["board"].get("name"):
         print("No board configured (`board` in the workflow config): skipping the board move.")
         return

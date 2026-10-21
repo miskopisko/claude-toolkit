@@ -11,6 +11,7 @@ Usage:  python3 tick.py <ticket> <criterion>... | --all  [--list] [--repo owner/
         <criterion> is a 1-based position under the heading, as --list prints them.
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,16 +49,19 @@ def criteria_lines(lines):
 
 def main():
     args = sys.argv[1:]
+    usage = "usage: tick.py <ticket> <criterion>... | --all  [--list] [--repo owner/name]"
     repo = None
     if "--repo" in args:
         i = args.index("--repo")
+        if i + 1 >= len(args):
+            sys.exit(usage)
         repo = args[i + 1]
         del args[i:i + 2]
     listing = "--list" in args
     tick_all = "--all" in args
     rest = [a for a in args if a not in ("--list", "--all")]
-    if not rest:
-        sys.exit("usage: tick.py <ticket> <criterion>... | --all  [--list] [--repo owner/name]")
+    if not rest or not rest[0].lstrip("#").isdigit() or not all(a.isdigit() for a in rest[1:]):
+        sys.exit(usage)
     n, picks = int(rest[0].lstrip("#")), [int(a) for a in rest[1:]]
     repo = repo or load()["repo"]
     if not repo:
@@ -94,7 +98,10 @@ def main():
     if changed:
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
             f.write("".join(lines))
-        run("gh", "issue", "edit", str(n), "--repo", repo, "--body-file", f.name)
+        try:
+            run("gh", "issue", "edit", str(n), "--repo", repo, "--body-file", f.name)
+        finally:
+            os.unlink(f.name)
 
     done = sum(CHECKBOX.match(lines[i].rstrip("\r\n")).group(2) != " " for i in boxes)
     print(f"#{n}: ticked {changed} more; acceptance criteria {done} of {len(boxes)} ticked")

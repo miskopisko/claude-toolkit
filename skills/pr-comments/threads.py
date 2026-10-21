@@ -5,7 +5,10 @@ Read-only. Prints per thread: the GraphQL thread id (for resolveReviewThread), t
 first comment's REST databaseId (for the replies endpoint), location, reviewer and body.
 Works for any reviewer, human or bot. Also prints each reviewer's latest review
 body: reviewers file findings there too (often about code a push didn't touch, so
-no thread is ever raised), and those have no thread to resolve.
+no thread is ever raised), and those have no thread to resolve. A reviewer's later
+verdict replaces their earlier body (an approval with no body clears an old "changes
+requested"), and a body is flagged when it predates the last commit or the PR's
+author has commented since.
 
 Usage:  python3 threads.py [pr-number] [--repo owner/name] [--all]
         no pr-number -> infers the PR for the current branch
@@ -23,7 +26,10 @@ query($owner:String!,$repo:String!,$pr:Int!){
     pullRequest(number:$pr){
       title
       headRefName
-      reviews(last:50){
+      author{login}
+      commits(last:1){ nodes{ commit{ committedDate } } }
+      comments(last:100){ nodes{ url createdAt author{login} } }
+      reviews(last:100){
         nodes{ url state submittedAt author{login __typename} body }
       }
       reviewThreads(first:100){
@@ -45,8 +51,12 @@ def sh(args):
     return subprocess.run(args, capture_output=True, text=True)
 
 
-def current_pr():
-    r = sh(["gh", "pr", "view", "--json", "number", "--jq", ".number"])
+def current_pr(repo):
+    # With --repo, gh needs the PR named, so name it by the current branch.
+    branch = sh(["git", "branch", "--show-current"]).stdout.strip()
+    if not branch:
+        return None
+    r = sh(["gh", "pr", "view", branch, "--repo", repo, "--json", "number", "--jq", ".number"])
     if r.returncode == 0 and r.stdout.strip():
         return int(r.stdout.strip())
     return None
@@ -74,7 +84,7 @@ def main():
         sys.exit("no repo: set `repo` in .claude/workflow.json, pass --repo, or run inside a gh checkout")
 
     if pr is None:
-        pr = current_pr()
+        pr = current_pr(repo)
         if pr is None:
             sys.exit("no PR for the current branch; pass a PR number")
 
@@ -103,17 +113,32 @@ def main():
               "resolve these, then run again for the rest")
     print()
 
-    # The latest review body per reviewer that wrote one.
-    latest = {}
+    # Each reviewer's latest review, over all of them, so a later verdict replaces an
+    # earlier body: an approval with no body clears an old "changes requested". An empty
+    # COMMENTED review is only the wrapper of a thread reply, not a verdict, so it doesn't
+    # count; nor do pending drafts. Reviews come oldest first.
+    newest = {}
     for rv in p["reviews"]["nodes"]:
-        if rv["body"].strip():
-            latest[who(rv)] = rv
+        if rv["state"] == "PENDING" or (rv["state"] == "COMMENTED" and not rv["body"].strip()):
+            continue
+        newest[who(rv)] = rv
+    latest = [rv for rv in newest.values() if rv["state"] != "DISMISSED" and rv["body"].strip()]
+    last_commit = ((p["commits"]["nodes"] or [{}])[0].get("commit") or {}).get("committedDate")
+    pr_author = (p.get("author") or {}).get("login")
     if latest:
         print("REVIEW BODIES: the latest from each reviewer. Findings here have no thread;")
-        print("answer them with a PR comment.")
-        for rv in latest.values():
+        print("answer them with a PR comment, unless they are already answered there.")
+        for rv in latest:
             print("-" * 78)
             print(f"    by {who(rv)} at {rv['submittedAt']} ({rv['state']})   {rv['url']}")
+            # ISO-8601 UTC timestamps from GitHub compare correctly as strings.
+            if last_commit and rv["submittedAt"] < last_commit:
+                print(f"    !! written before the last commit ({last_commit}); some of it may be fixed already")
+            since = [c for c in p["comments"]["nodes"]
+                     if (c.get("author") or {}).get("login") == pr_author and c["createdAt"] > rv["submittedAt"]]
+            if since:
+                print(f"    !! {pr_author} has commented on the PR since ({len(since)}); "
+                      f"check it isn't already answered: {since[-1]['url']}")
             for ln in rv["body"].splitlines():
                 print(f"    {ln}")
         print("-" * 78)

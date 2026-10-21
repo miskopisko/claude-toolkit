@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Report everything prep-branch needs to know before it touches a branch.
 
-Read-only: no fetch, no checkout, no tracker writes. Run `git fetch origin --prune`
-first so the origin/* refs it compares against are current.
+Read-only: no fetch, no checkout, no tracker writes. Run `git fetch <remote> --prune`
+first so the refs it compares against are current. <remote> is the workflow config's
+`remote`, the git remote for the shared repo (default origin).
 
 Tickets branch from the trunk and their PRs target it (`trunk` in the workflow config).
 This reports the ticket's readiness and its parent chain (for context only), how far
-the local trunk has drifted from origin, any ticket branch that already exists, and
+the local trunk has drifted from <remote>/<trunk>, any ticket branch that already exists, and
 anything in the working tree that would get in the way.
 
 Usage:  python3 preflight.py <ticket-number> [--repo owner/name]
@@ -33,6 +34,13 @@ def run(*cmd):
 
 def git(*args):
     return run("git", *args)
+
+
+def as_set(v):
+    """A label setting may be one name or a list of names."""
+    if not v:
+        return set()
+    return {v} if isinstance(v, str) else set(v)
 
 
 def lines(out):
@@ -63,10 +71,10 @@ def flag(msg):
     print(f"  ⛔ {msg}")
 
 
-def legacy_remotes(patterns):
+def legacy_remotes(remote, patterns):
     found = []
     for p in patterns:
-        found += [b.strip() for b in lines(git("branch", "-r", "--list", f"origin/{p}"))]
+        found += [b.strip() for b in lines(git("branch", "-r", "--list", f"{remote}/{p}"))]
     return sorted(set(found))
 
 
@@ -141,6 +149,8 @@ def main():
     repo = cfg["repo"]
     if "--repo" in args:
         i = args.index("--repo")
+        if i + 1 >= len(args):
+            sys.exit("usage: preflight.py <ticket-number> [--repo owner/name]")
         repo = args[i + 1]
         del args[i:i + 2]
     if not args or not args[0].lstrip("#").isdigit():
@@ -151,7 +161,8 @@ def main():
     trunk, prefix, labels_cfg = cfg["trunk"], cfg["branchPrefix"], cfg["labels"]
     legacy = cfg.get("legacyBranches") or []
     me = run("gh", "api", "user", "--jq", ".login") or "?"
-    base = f"origin/{trunk}"
+    remote = cfg["remote"]
+    base = f"{remote}/{trunk}"
 
     # ── Ticket ──────────────────────────────────────────────────────────────
     t = issue(repo, n)
@@ -164,19 +175,24 @@ def main():
           f"assignees={','.join(who) or '—'}")
     if t["state"] != "OPEN":
         flag("ticket is closed")
-    if labels_cfg.get("spec") and labels_cfg["spec"] in labels:
-        flag(f"labelled '{labels_cfg['spec']}': a spec, not an implementable ticket")
+    spec = as_set(labels_cfg.get("spec")) & labels
+    if spec:
+        flag(f"labelled {', '.join(sorted(spec))}: a spec, not an implementable ticket")
+    if "subIssuesSummary" not in t:
+        print("  ⚠️  this gh can't read sub-issues (no subIssuesSummary; upgrade gh): "
+              "couldn't check whether this is a parent ticket or epic — check by hand")
     subs = (t.get("subIssuesSummary") or {}).get("total") or 0
     if subs:
         flag(f"has {subs} sub-issue(s): a parent ticket, not one to implement directly")
-    parked = set(labels_cfg.get("parked") or []) & labels
+    parked = as_set(labels_cfg.get("parked")) & labels
     if parked:
         flag(f"parked ({', '.join(sorted(parked))})")
-    ready = set(labels_cfg.get("ready") or [])
+    ready = as_set(labels_cfg.get("ready"))
     if ready and not ready & labels:
         print(f"  ⚠️  none of the ready labels ({', '.join(sorted(ready))}) — takeable only if the user says so")
-    if labels_cfg.get("needsTriage") and labels_cfg["needsTriage"] in labels:
-        print(f"  ⚠️  labelled '{labels_cfg['needsTriage']}': not triaged yet")
+    triage = as_set(labels_cfg.get("needsTriage")) & labels
+    if triage:
+        print(f"  ⚠️  labelled {', '.join(sorted(triage))}: not triaged yet")
     if who and me not in who:
         flag(f"assigned to someone else ({','.join(who)})")
     elif not who:
@@ -211,22 +227,23 @@ def main():
     print(f"  {base}: {git('log', '-1', '--format=%h %s', base)}")
     if git("rev-parse", "--verify", "-q", f"refs/heads/{trunk}"):
         a, b = (git("rev-list", "--left-right", "--count", f"{trunk}...{base}") or "0 0").split()
-        print(f"  local {trunk} vs origin: ahead {a}, behind {b}")
+        print(f"  local {trunk} vs {base}: ahead {a}, behind {b}")
         if int(a):
             flag(f"local {trunk} has {a} commit(s) not on {base} — unpushed work, ask before touching it")
 
     # ── Ticket branch ───────────────────────────────────────────────────────
     print(f"\n## TICKET BRANCH ({prefix}{n}-<slug>)")
     local = [b.strip(" *+") for b in lines(git("branch", "--list", f"{prefix}{n}-*"))]
-    rem = [b.strip() for b in lines(git("branch", "-r", "--list", f"origin/{prefix}{n}-*"))]
+    # Any remote: in a fork, ticket branches are pushed to the fork, not to `remote`.
+    rem = [b.strip() for b in lines(git("branch", "-r", "--list", f"*/{prefix}{n}-*"))]
     print(f"  local: {local or '(none)'}   remote: {rem or '(none)'}")
-    legacy_refs = legacy_remotes(legacy)
+    legacy_refs = legacy_remotes(remote, legacy)
     for b in local:
         up = git("rev-parse", "--abbrev-ref", f"{b}@{{u}}") or "(no upstream)"
         ahead = count(f"{base}..{b}")
         behind = count(f"{b}..{base}")
         print(f"  {b}: upstream={up}  ahead of {trunk}={ahead}  behind {trunk}={behind}")
-        if any(fnmatch.fnmatch(up, f"origin/{p}") for p in legacy):
+        if any(fnmatch.fnmatch(up, f"{remote}/{p}") for p in legacy):
             print(f"  ⚠️  {b} still tracks a legacy branch — repoint it at {base} (step 2)")
         # Commits of a legacy branch that hasn't reached the trunk would ride along on a rebase.
         for e in legacy_refs:

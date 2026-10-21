@@ -22,29 +22,31 @@ Install [`gh`](https://cli.github.com/) and run `gh auth login`.
 
 ## Settings
 
-pr-comments is one of five workflow skills (next, prep-branch, gate, commit-pr and pr-comments) that share one config file: `.claude/workflow.json` at the repository root, committed for the team, with `.claude/workflow.local.json` beside it for your own overrides (git-ignore that one). Every key is optional. With no file at all, the repo comes from `gh`.
+pr-comments is one of five workflow skills (next, prep-branch, gate, commit-pr and pr-comments) that share one config file: `.claude/workflow.json` at the repository root, committed for the team, with `.claude/workflow.local.json` beside it for your own overrides (git-ignore that one). Every key is optional. With no file at all, the repo comes from the URL of the git remote named by `remote` (default `origin`).
 
 The keys pr-comments uses:
 
 ```json
 {
   "repo": "acme/shop-web",
+  "remote": "origin",
   "rulesFile": "docs/working-agreements.md"
 }
 ```
 
 - `repo`: the repository the PR is in, used for the reply API.
+- `remote`: the git remote that points at that shared repository, where `repo` is read from when unset. In a fork this is usually `upstream`.
 - `rulesFile`: a doc of your team's standing rules. pr-comments reads it first, and its rules win, for example on how replies are worded or who resolves threads.
 
 ## How it works
 
-1. **Fetches the threads** with [`threads.py`](threads.py): every unresolved thread on the PR, with the ids needed to reply and resolve, the reviewer, and the whole conversation. Threads on lines that have since changed are marked outdated.
+1. **Fetches the threads** with [`threads.py`](threads.py): every unresolved thread on the PR, with the ids needed to reply and resolve, the reviewer, and the whole conversation. Threads on lines that have since changed are marked outdated. It also prints each reviewer's latest review body, since findings land there too; a later approval replaces an earlier "changes requested", pure summaries ("No open issues") are skipped, and bodies already answered on the PR aren't answered twice.
 2. **Assesses each finding**: what it says is wrong, whether it holds against the current code, agree or disagree with the evidence, the fix, and how serious it is. Then it stops, and you choose what to fix.
-3. **Applies the agreed fixes** and runs `/gate` on what it touched. It doesn't stage, commit or push unless you ask; `/commit-pr` does that.
+3. **Applies the agreed fixes** and runs `/gate --all` on them, since they're left unstaged and the gate otherwise checks only what's staged. It doesn't stage, commit or push unless you ask; `/commit-pr` does that.
 4. **Replies and resolves**, only after the fix is on the remote. Each reply names the commit, what changed and why that answers the finding, in your project's style if it has one. Findings you disagreed with get the reasoning, not silence.
 5. **Offers a writeup** of the round: each finding and its verdict, wrong ones included, for you to place or skip.
 6. **Loops** while new threads come in.
 
 ## Requirements
 
-Python 3, `git` and `gh`, on Linux or macOS.
+Python 3, `git` and `gh`, on Linux or macOS. The `remote` setting names the shared repo's remote (default `origin`); in a fork, set it to the remote that points at the shared repo, often `upstream`.

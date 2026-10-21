@@ -2,7 +2,11 @@
 name: next
 description: Orient on an epic in a GitHub repo — what's in flight, what's takeable, what's blocked, and the one thing to do next. Read-only. Use when the user asks where they left off, what's next on an epic, what state a ticket tree is in, or starts a session after time away.
 argument-hint: "[epic]   e.g. /next, /next 412"
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/frontier.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py)
+allowed-tools:
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/frontier.py)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/frontier.py *)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py *)
 ---
 
 # Next
@@ -19,9 +23,10 @@ python3 ${CLAUDE_SKILL_DIR}/workflow.py
 ```
 
 It prints the merged workflow config (`.claude/workflow.json`, then `.claude/workflow.local.json`,
-then what git and `gh` work out). This skill uses `repo`, `trunk`, `branchPrefix`,
-`legacyBranches`, `labels` and `rulesFile`. Below, `<trunk>` and `<branchPrefix>` mean the
-values printed there.
+then what git and `gh` work out). This skill uses `repo`, `remote`, `trunk`, `branchPrefix`,
+`legacyBranches`, `labels` and `rulesFile`. Below, `<repo>`, `<trunk>` and `<branchPrefix>`
+mean the values printed there, and `<remote>` is the `remote` setting: the git remote that
+points at the shared repo (default `origin`; in a fork, usually `upstream`).
 
 If `rulesFile` is set, read that file now. Its rules win over this skill's defaults wherever
 they disagree.
@@ -37,6 +42,17 @@ In order:
    parent, it may itself be the epic; check it has sub-issues. On `<trunk>` itself there is
    no ticket to go on; fall through to asking.
 3. Ask. Don't guess between two candidates.
+
+next needs an epic: an issue with sub-issues. If the repo has none (nothing the user names
+has sub-issues, and no parent turns up from the branch), say so plainly, skip step 2, and
+list the open issues instead, theirs first:
+
+```bash
+gh issue list --repo <repo> --state open --assignee @me
+gh issue list --repo <repo> --state open --search "no:assignee" --limit 30
+```
+
+Then carry on from step 3; the recommendation picks from those lists.
 
 ## 2. Walk the tree
 
@@ -55,18 +71,18 @@ Buckets, in the order it prints them:
 | Bucket | Means |
 | --- | --- |
 | **IN FLIGHT (yours)** | assigned to you, open: finish these before starting anything |
-| **TAKEABLE NOW** | unassigned, unblocked, carries one of `labels.ready` |
-| **UNBLOCKED, NOT MARKED READY** | nothing gates it, but no ready label: usually written and never triaged |
+| **TAKEABLE NOW** | unassigned, unblocked, carries one of `labels.ready` (any such ticket, when `labels.ready` is empty) |
+| **UNBLOCKED, NOT MARKED READY** | nothing gates it, but no ready label: usually written and never triaged. Never shown when `labels.ready` is empty |
 | **BLOCKED** | has open blockers; show the count, don't recommend these |
 | **PARKED** | carries one of `labels.parked`: mention only if asked |
 | **ASSIGNED TO OTHERS** | someone else's |
 
 It also flags open tickets **the user authored** that still carry `labels.needsTriage`.
 Triage is for issues you did not create, so that label on your own ticket is a mistake, not
-a state.
+a state. With `labels.needsTriage` unset or empty, there is no such check.
 
 Last, if `legacyBranches` is set, it lists every remote branch matching those globs that
-holds commits not on `origin/<trunk>` (step 3 says why). With `legacyBranches` empty the
+holds commits not on `<remote>/<trunk>` (step 3 says why). With `legacyBranches` empty the
 check is skipped.
 
 ## 3. Add local state: the tracker doesn't know this
@@ -76,10 +92,10 @@ Tickets branch from `<trunk>` and their PRs target it, so `<trunk>` is the refer
 ```bash
 git branch --show-current
 git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "(not pushed)"
-git log --oneline origin/<trunk>..HEAD                 # commits ahead of the trunk
+git log --oneline <remote>/<trunk>..HEAD               # commits ahead of the trunk
 git status --short                                     # uncommitted + staged
 git ls-files -v | grep '^S'                            # skip-worktree files
-gh pr list --state open --json number,title,headRefName,baseRefName,author,reviewDecision
+gh pr list --repo <repo> --state open --json number,title,headRefName,baseRefName,author,reviewDecision
 ```
 
 **The trap this catches:** work that is finished but never committed. A branch with an
@@ -125,4 +141,5 @@ silently promote it.
 
 Do not start the work. The user picks. If they say go, `/prep-branch <n>` sets up the branch
 and takes the ticket (assigns it, and moves its card to In progress when `board` is set).
-The desk plugin's side pane shows the branch, issue and PR state while they work.
+If the optional desk plugin is installed, its side pane shows the branch, issue and PR state
+while they work.

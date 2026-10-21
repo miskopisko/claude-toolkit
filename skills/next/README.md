@@ -9,6 +9,8 @@ Tells you what to pick up next on an epic in a GitHub repo. It walks the epic's 
 /next 412      # a specific epic
 ```
 
+It works on an epic: an issue whose tickets are its GitHub sub-issues. If the repo has no epics, next says so and lists the open issues assigned to you and the unassigned ones instead.
+
 You can also just ask Claude "where was I?" or "what's next on this epic?".
 
 ## Install
@@ -29,6 +31,7 @@ The keys next uses:
 ```json
 {
   "repo": "acme/shop-web",
+  "remote": "origin",
   "trunk": "main",
   "branchPrefix": "feature/",
   "legacyBranches": ["release/*"],
@@ -43,9 +46,10 @@ The keys next uses:
 ```
 
 - `repo`, `trunk`: where the tickets live, and the branch tickets branch from and PR into.
+- `remote`: the git remote that points at the shared repo (default `origin`; in a fork, usually `upstream`). `repo` is read from it when unset, and the trunk and long-lived branches are compared on it.
 - `branchPrefix`: how it finds the ticket from your branch (`feature/412-csv-export`).
 - `legacyBranches`: globs for long-lived branches still being finished. Tickets merged into one of them are closed but not on the trunk yet, so next warns before recommending work that depends on them. Leave it empty to skip the check.
-- `labels`: which labels mean ready to take, parked, a spec (whose own sub-issues count as part of the epic), and needs triage.
+- `labels`: which labels mean ready to take, parked, a spec (whose own sub-issues count as part of the epic), and needs triage. The defaults come from one triage convention, where a ticket is only takeable once someone has marked it ready. If your team doesn't work that way, set `"ready": []` and every unassigned, unblocked ticket counts as takeable; set `"needsTriage": null` to turn off the check for needs-triage labels on tickets you wrote.
 - `rulesFile`: a doc of your team's standing rules. next reads it first, and its rules win.
 
 Run `python3 workflow.py` from inside the repo to see the merged settings.
@@ -61,4 +65,4 @@ It stops there. `/prep-branch <n>` sets up the branch when you say go.
 
 ## Requirements
 
-Python 3, `git` and `gh`, on Linux or macOS. The epic's tickets must be GitHub sub-issues of it, and blockers GitHub issue dependencies.
+Python 3, `git` and `gh`, on Linux or macOS. The epic's tickets must be GitHub sub-issues of it, and blockers GitHub issue dependencies. The `remote` setting names the shared repo's remote (default `origin`); in a fork, set it to the remote that points at the shared repo, often `upstream`.

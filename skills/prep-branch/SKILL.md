@@ -2,22 +2,25 @@
 name: prep-branch
 description: Prepare the local checkout to start a ticket. Puts the user on a ticket branch cut from the latest trunk that tracks it, with nothing in the working tree in the way, and takes the ticket (assigns it to the user and, if a board is configured, moves its card to In progress). Use when the user is about to start a ticket, says go after /next, or asks to set up, refresh or prep their branch.
 argument-hint: "[ticket]   e.g. /prep-branch, /prep-branch 412"
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py), Bash(python3 ${CLAUDE_SKILL_DIR}/preflight.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/take.py *)
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py), Bash(python3 ${CLAUDE_SKILL_DIR}/preflight.py), Bash(python3 ${CLAUDE_SKILL_DIR}/preflight.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/take.py), Bash(python3 ${CLAUDE_SKILL_DIR}/take.py *)
 ---
 
 # Prep branch
 
 End state: the user is on `<branchPrefix><n>-<slug>`, which contains the tip of
-`origin/<trunk>` and tracks it, the working tree is exactly as clean as it was, and the
+`<remote>/<trunk>` and tracks it, the working tree is exactly as clean as it was, and the
 ticket is assigned to the user and, when a board is configured, sits in its In progress
 column.
 
 ```
-<branchPrefix><n>-<slug>  → tracks → origin/<trunk>
+<branchPrefix><n>-<slug>  → tracks → <remote>/<trunk>
 ```
 
-`trunk`, `branchPrefix`, `legacyBranches` and `board` come from the workflow config. See
-them with `python3 ${CLAUDE_SKILL_DIR}/workflow.py`. Tickets branch from the trunk and their
+`remote`, `trunk`, `branchPrefix`, `legacyBranches` and `board` come from the workflow
+config. See them with `python3 ${CLAUDE_SKILL_DIR}/workflow.py`. `<remote>` is the `remote`
+setting: the git remote for the shared repo, `origin` by default (in a fork, often
+`upstream`). Your own branches are pushed to your push remote, which is `origin` unless
+the repo says otherwise; in a fork that's the fork, not `<remote>`. Tickets branch from the trunk and their
 PRs target it. A parent ticket or epic is context for the report, not a branch to build on.
 Branches matching `legacyBranches` are long-lived ones still being finished: never branch
 from them or rebase their commits into a ticket.
@@ -40,13 +43,13 @@ Resolve the ticket from the user's message, else from a `<branchPrefix><n>-…` 
 else ask. Then:
 
 ```bash
-git fetch origin --prune
+git fetch <remote> --prune
 python3 ${CLAUDE_SKILL_DIR}/preflight.py <n>
 git rev-parse HEAD        # note as START, for step 4
 ```
 
 The script reports the ticket's readiness and parent chain, whether the local trunk has
-drifted from `origin/<trunk>`, any existing `<branchPrefix><n>-*` branch, and the working
+drifted from `<remote>/<trunk>`, any existing `<branchPrefix><n>-*` branch, and the working
 tree. Every `⛔` line is a decision for the user; it exits non-zero while any remain.
 
 For a dirty tree, list the files and offer, without choosing:
@@ -78,37 +81,37 @@ remaining `⛔` (an untriaged, not-ready or unassigned ticket is a warning, not 
 
 ## 2. The ticket branch
 
-If a local trunk branch exists and is only behind origin, fast-forward it so it doesn't go
-stale: `git fetch origin <trunk>:<trunk>` (refused while it is checked out; use
-`git merge --ff-only origin/<trunk>` there instead).
+If a local trunk branch exists and is only behind `<remote>/<trunk>`, fast-forward it so it
+doesn't go stale: `git fetch <remote> <trunk>:<trunk>` (refused while it is checked out; use
+`git merge --ff-only <remote>/<trunk>` there instead).
 
 **None exists.** Name it `<branchPrefix><n>-<slug>`, where the slug is the title's core in
 2–4 kebab words. For example, #412 "Let admins export a filtered report as CSV" becomes
 `feature/412-csv-export`.
 
 ```bash
-git switch -c <branchPrefix><n>-<slug> origin/<trunk>
-git branch --set-upstream-to=origin/<trunk>
+git switch -c <branchPrefix><n>-<slug> <remote>/<trunk>
+git branch --set-upstream-to=<remote>/<trunk>
 ```
 
 **One exists, with 0 commits ahead of the trunk:** `git switch` to it and
-`git merge --ff-only origin/<trunk>`.
+`git merge --ff-only <remote>/<trunk>`.
 
-**One exists, with commits of its own:** `git rebase origin/<trunk>`. Commits that already
+**One exists, with commits of its own:** `git rebase <remote>/<trunk>`. Commits that already
 reached the trunk (a legacy branch merged with a merge commit) drop out by themselves. If
 preflight flagged that the branch contains a legacy branch **not yet on the trunk**, stop:
 a rebase would carry that branch's commits into the ticket's PR. Ask whether to wait for it
-or move only the ticket's own commits with `git rebase --onto origin/<trunk> <last commit of the legacy branch>`.
+or move only the ticket's own commits with `git rebase --onto <remote>/<trunk> <last commit of the legacy branch>`.
 
 If that branch is already pushed, rebasing it means another force-push. Ask first, and
-offer `git merge origin/<trunk>` as the alternative.
+offer `git merge <remote>/<trunk>` as the alternative.
 
-Upstream: set it to `origin/<trunk>`, including on a branch that still tracks a legacy
+Upstream: set it to `<remote>/<trunk>`, including on a branch that still tracks a legacy
 branch. Leave it alone if the branch is already pushed and tracks its own
-`origin/<branchPrefix><n>-…`.
+`<push remote>/<branchPrefix><n>-…`.
 
-Done when `git rev-parse --abbrev-ref @{u}` names `origin/<trunk>` (or the branch's own
-remote), and `git merge-base --is-ancestor origin/<trunk> HEAD` succeeds.
+Done when `git rev-parse --abbrev-ref @{u}` names `<remote>/<trunk>` (or the branch's own
+pushed branch), and `git merge-base --is-ancestor <remote>/<trunk> HEAD` succeeds.
 
 ## 3. Take the ticket
 
@@ -135,7 +138,7 @@ Implementation does not start before that.
 
 ```bash
 git status -sb                                    # branch...upstream, tree as clean as at START
-git merge-base --is-ancestor origin/<trunk> HEAD && echo "trunk contained"
+git merge-base --is-ancestor <remote>/<trunk> HEAD && echo "trunk contained"
 git ls-files -v | grep '^S'                       # skip-worktree files are still hidden
 python3 ${CLAUDE_SKILL_DIR}/preflight.py --deps START
 ```
@@ -149,8 +152,8 @@ restores. Run any of them only on a yes, and one marked as deleting what is inst
 Report briefly: what each step found and changed, every command that rewrote or pushed
 anything, what step 3 did, and anything the user declined. End with the first-push note.
 Plain `git push` is refused because the branch name differs from its upstream
-(`push.default=simple`). Use `git push -u origin HEAD` instead, which also moves the
-upstream to the branch's own remote, ready for a PR into the trunk with `/commit-pr`.
+(`push.default=simple`). Use `git push -u <push remote> HEAD` instead (`origin`, unless the
+repo pushes elsewhere), which also moves the upstream to the branch's own pushed branch, ready for a PR into the trunk with `/commit-pr`.
 
 Then stop. Implementation starts when the user says so. After it, `/gate` checks the work
 and `/commit-pr` commits it and opens the PR.

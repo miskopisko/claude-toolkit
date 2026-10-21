@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Gather everything needed to draft a commit + PR, and flag anything unsafe.
 
-Read-only apart from a `git fetch`: writes nothing, stages nothing. Exits non-zero if a
+Read-only apart from a `git fetch` of the shared repo's remote (`remote` in the workflow
+config, default origin): writes nothing, stages nothing. Exits non-zero if a
 hard blocker is found. Also prints where the house style for commit messages and PR
 bodies can be learned from: the rules file, recent commits on the trunk, their trailers,
 and the PR template.
@@ -26,6 +27,18 @@ def rc(*a):
     return subprocess.run(a, capture_output=True, text=True).returncode
 
 
+def push_remote(remote):
+    """Where the user's own branches go: remote.pushDefault, else origin (in a fork made with
+    `gh repo fork`, the fork), else the shared repo's remote."""
+    configured = sh("git", "config", "--get", "remote.pushDefault")
+    if configured:
+        return configured
+    return "origin" if rc("git", "remote", "get-url", "origin") == 0 else remote
+
+
+SQUASHED = re.compile(r"\s*\(#\d+\)$")
+
+
 def tickets_from(branch, prefix):
     """Leading numbers of the branch name after its prefix: feature/412-413-csv-export -> 412, 413."""
     rest = branch[len(prefix):] if prefix and branch.startswith(prefix) else branch.rsplit("/", 1)[-1]
@@ -40,8 +53,15 @@ def tickets_from(branch, prefix):
 def main():
     cfg = load()
     args = sys.argv[1:]
-    repo = args[args.index("--repo") + 1] if "--repo" in args else cfg["repo"]
-    trunk, prefix = cfg["trunk"], cfg["branchPrefix"]
+    if "--repo" in args:
+        i = args.index("--repo")
+        if i + 1 >= len(args) or args[i + 1].startswith("-"):
+            sys.exit("usage: precheck.py [--repo owner/name] [--no-fetch]")
+        repo = args[i + 1]
+    else:
+        repo = cfg["repo"]
+    trunk, prefix, remote = cfg["trunk"], cfg["branchPrefix"], cfg["remote"]
+    pushto = push_remote(remote)
     legacy = cfg.get("legacyBranches") or []
     branch = sh("git", "branch", "--show-current")
     blockers, warnings = [], []
@@ -55,7 +75,7 @@ def main():
     # for the PR body's "Part of #n (epic #nn)".
     base = trunk
     tickets = tickets_from(branch, prefix) if branch else []
-    prs_issues = sh("gh", "pr", "view", *gh_repo, "--json", "closingIssuesReferences",
+    prs_issues = sh("gh", "pr", "view", branch, *gh_repo, "--json", "closingIssuesReferences",
                     "--jq", "[.closingIssuesReferences[].number]|map(tostring)|join(\",\")") if branch else ""
     for n in (prs_issues or "").split(","):
         if n and n not in tickets:
@@ -115,34 +135,35 @@ def main():
 
     # --- branch freshness ---------------------------------------------------
     if "--no-fetch" not in args:
-        sh("git", "fetch", "-q", "origin")
-    if rc("git", "rev-parse", "--verify", "-q", f"origin/{base}") != 0:
-        blockers.append(f"no origin/{base} — check `trunk` in the workflow config")
+        sh("git", "fetch", "-q", remote)
+    if rc("git", "rev-parse", "--verify", "-q", f"{remote}/{base}") != 0:
+        blockers.append(f"no {remote}/{base} — check `trunk` and `remote` in the workflow config")
     else:
-        behind = sh("git", "rev-list", "--count", f"HEAD..origin/{base}")
-        ahead = sh("git", "rev-list", "--count", f"origin/{base}..HEAD")
-        print(f"\nvs origin/{base}: {ahead or 0} ahead, {behind or 0} behind")
+        behind = sh("git", "rev-list", "--count", f"HEAD..{remote}/{base}")
+        ahead = sh("git", "rev-list", "--count", f"{remote}/{base}..HEAD")
+        print(f"\nvs {remote}/{base}: {ahead or 0} ahead, {behind or 0} behind")
         if behind and behind != "0":
-            warnings.append(f"branch is {behind} commit(s) behind origin/{base} — "
+            warnings.append(f"branch is {behind} commit(s) behind {remote}/{base} — "
                             f"merge it in before opening the PR")
 
         # A legacy branch not yet on the trunk, carried on this branch, would land in the PR too.
         refs = set()
         for p in legacy:
-            refs |= {b.strip() for b in sh("git", "branch", "-r", "--list", f"origin/{p}").splitlines() if b.strip()}
+            refs |= {b.strip() for b in sh("git", "branch", "-r", "--list", f"{remote}/{p}").splitlines() if b.strip()}
         for e in sorted(refs):
             if rc("git", "merge-base", "--is-ancestor", e, "HEAD") != 0:
                 continue
-            extra = sh("git", "rev-list", "--count", f"origin/{base}..{e}")
+            extra = sh("git", "rev-list", "--count", f"{remote}/{base}..{e}")
             if extra and extra != "0":
                 blockers.append(f"branch contains {e}, which has {extra} commit(s) not on "
-                                f"origin/{base} — the PR would carry them; ask the user")
+                                f"{remote}/{base} — the PR would carry them; ask the user")
 
     # --- upstream + existing PR --------------------------------------------
     up = sh("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    pushed = up and up == f"origin/{branch}"
+    # Pushed = tracking a branch of the same name on any remote (the fork's, in a fork).
+    pushed = bool(up) and "/" in up and up.split("/", 1)[1] == branch
     print(f"upstream: {up or '(none)'}"
-          + ("" if pushed else f"  — first push: git push -u origin HEAD"))
+          + ("" if pushed else f"  — first push: git push -u {pushto} HEAD"))
     pr = sh("gh", "pr", "list", *gh_repo, "--head", branch, "--state", "open",
             "--json", "number,url", "--jq", ".[0].url") if branch else ""
     if pr:
@@ -166,13 +187,16 @@ def main():
     if os.path.isdir(tdir):
         templates += [os.path.join(".github/PULL_REQUEST_TEMPLATE", f) for f in sorted(os.listdir(tdir))]
     print(f"PR template: {', '.join(templates) or '(none)'}")
-    subjects = sh("git", "log", "--no-merges", "-12", "--format=%s", f"origin/{base}")
-    print(f"recent subjects on origin/{base}:")
+    # Non-merge commits only. A squash merge's subject is the PR title plus " (#n)": strip
+    # the suffix and label it, since a PR title isn't necessarily how commits are written.
+    subjects = sh("git", "log", "--no-merges", "-12", "--format=%s", f"{remote}/{base}")
+    print(f"recent subjects on {remote}/{base} (evidence of the style, not rules; "
+          f"[PR] = a squash-merged PR title, its (#n) removed):")
     for s in subjects.splitlines():
-        print(f"  {s}")
+        print(f"  [PR] {SQUASHED.sub('', s)}" if SQUASHED.search(s) else f"  {s}")
     trailers = collections.Counter()
     for t in sh("git", "log", "--no-merges", "-50", "--format=%(trailers:only,unfold)",
-                f"origin/{base}").splitlines():
+                f"{remote}/{base}").splitlines():
         if ":" in t:
             trailers[t.split(":", 1)[0].strip()] += 1
     print("trailers in the last 50: " + (", ".join(f"{k} ×{v}" for k, v in trailers.most_common()) or "(none)"))

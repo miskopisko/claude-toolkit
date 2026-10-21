@@ -2,7 +2,11 @@
 name: pr-comments
 description: Work a GitHub pull request's unresolved review threads end to end — assess each finding on its merits, apply the fixes the user agrees to, then reply to and resolve every thread once the fix is pushed. Works for any reviewer, human or bot. Use when the user mentions PR review comments, review feedback, a bot's review, or a review round on a PR.
 argument-hint: "[pr]   e.g. /pr-comments, /pr-comments 412"
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/threads.py *), Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py)
+allowed-tools:
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/threads.py)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/threads.py *)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py)
+  - Bash(python3 ${CLAUDE_SKILL_DIR}/workflow.py *)
 ---
 
 # PR comments
@@ -45,7 +49,19 @@ especially, file findings there as well, often about code the last push didn't t
 thread is ever raised for them. "0 unresolved" does not mean the round is done while a review
 body holds findings. Number them after the threads and assess them the same way. They have
 no thread to resolve, so in step 4 answer them with one PR comment (`gh pr comment <pr>
---body-file <file>`) that takes each in turn.
+--repo <repo> --body-file <file>`) that takes each in turn.
+
+Only a reviewer's latest review counts: a later approval with no body replaces an earlier
+"changes requested", so that body no longer shows. Of the bodies that do show:
+
+- **Skip a body that is only a summary with no finding** ("No open issues", "Approval
+  recommended", "LGTM"). Don't number it or answer it. Read to the end first, though: a
+  header like "Findings: None" can sit above a collapsed "previously missed" section that
+  holds real ones.
+- **Never re-answer a body the user already replied to.** A body flagged *has commented on
+  the PR since* may already be answered: open that comment, and drop every finding it covers.
+- A body flagged *written before the last commit* may already be fixed: check the current
+  code before assessing it, as with an outdated thread.
 
 ## 2. Assess each finding, then stop
 
@@ -65,8 +81,9 @@ change; say which.
 
 ## 3. Apply the agreed fixes
 
-- **Do not stage, commit or push** unless the user asks. Make the edits, run `/gate` for
-  whatever you touched, report, and stop. The user reviews the working tree and says when to
+- **Do not stage, commit or push** unless the user asks. Make the edits, run `/gate --all`
+  (the fixes aren't staged, and the gate refuses an empty index, so it has to scope from the
+  working tree), say in the report that the scope was the working tree, and stop. The user reviews the working tree and says when to
   commit; `/commit-pr` does that when they do.
 - Another Claude session may share this working tree. Before editing, check `git status`;
   touch only the files the fixes need, and don't revert or reformat changes you didn't make.
@@ -77,7 +94,8 @@ change; say which.
 ## 4. Reply and resolve, only after the fix is pushed
 
 A reply that cites a commit the remote doesn't have yet is worse than no reply. Confirm the
-push landed first (`git log origin/<branch> -1`, or `gh pr view --json commits`). Replying and
+push landed first: `gh pr view <pr> --repo <repo> --json headRefOid -q .headRefOid` must
+print the sha you cite (or one after it). Replying and
 resolving write to GitHub, so ask before doing it unless the user already said to.
 
 **Reply to a thread** (REST, uses `comment_id`; `<repo>` is `repo` from the config):
@@ -131,5 +149,6 @@ let the user place it or skip it.
 ## 6. Loop
 
 A push may trigger a fresh review, from a bot or a person. If new threads appear, go back to
-step 1 and increment the round number. Stop when `threads.py` reports nothing unresolved. The
-desk plugin's side pane shows the unresolved thread count as it changes.
+step 1 and increment the round number. Stop when `threads.py` reports nothing unresolved. If the
+optional desk plugin is installed, its side pane shows the unresolved thread count as it
+changes.

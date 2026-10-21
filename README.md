@@ -87,7 +87,8 @@ yourself.
 - **The workflow skills** (next, prep-branch, gate, commit-pr, pr-comments)
   work through your `gh` login. They read settings from `.claude/workflow.json`
   and `.claude/workflow.local.json` in your repo. gate runs only the commands in
-  that config, and shows them to you before running ones it hasn't seen. Only
+  that config, and refuses to run them until you've approved them; any change
+  to them needs your approval again. Only
   prep-branch, commit-pr and pr-comments write to GitHub (assigning, board
   moves, PRs, review replies). prep-branch asks before every push,
   commit-pr pushes only once you've approved its commit message, and

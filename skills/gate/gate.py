@@ -4,14 +4,25 @@
 The jobs come from `gate.jobs` in .claude/workflow.json (or workflow.local.json); see
 the skill's README for their shape. Never stages, commits or pushes.
 
+The jobs are shell commands from a file anyone with commit access can change, so the
+gate runs only a `gate` block this checkout has trusted: its sha256 fingerprint must be
+listed in `$(git rev-parse --git-path gate-trusted)`. Any change to the block, in either
+config file, makes it untrusted again. `--trust` records the current block's fingerprint,
+and is only for after the user has seen every command and said yes.
+
 Usage:
   python3 gate.py            # scope from staged files
-  python3 gate.py --plan     # show what would run, run nothing
+  python3 gate.py --plan     # show what would run, run nothing (works with nothing staged)
   python3 gate.py --all      # scope from all working-tree changes, not just staged
+  python3 gate.py --trust    # trust the current gate block, run nothing
 
-Exit status: 0 all ran jobs passed (or none applied), 1 a job failed or nothing is
-staged, 2 no gate jobs are configured or the config is invalid.
+Exit status: 0 all ran jobs passed (or none applied), or --plan / --trust done; 1 a job
+failed or nothing is staged; 2 no gate jobs are configured or the config is invalid;
+3 the gate block isn't trusted yet.
 """
+import hashlib
+import json
+import os
 import re
 import subprocess
 import sys
@@ -117,10 +128,43 @@ def read_jobs(cfg):
     return parsed, [str(n) for n in not_local]
 
 
+def fingerprint(gate):
+    """sha256 of the effective gate block, independent of key order and whitespace."""
+    blob = json.dumps(gate, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def trust_file(repo):
+    p = out(["git", "rev-parse", "--git-path", "gate-trusted"], repo).strip()
+    return os.path.join(repo, p)  # an absolute p wins in join
+
+
+def trusted(fp, repo):
+    try:
+        with open(trust_file(repo)) as f:
+            return fp in (l.strip() for l in f)
+    except FileNotFoundError:
+        return False
+
+
+def show_jobs(jobs, not_local):
+    for j in jobs:
+        where = "" if j["cwd"] in (".", "") else f"  (in {j['cwd']})"
+        print(f"  - {j['name']}: {j['run']}{where}")
+    if not_local:
+        print(f"  notLocal: {', '.join(not_local)}")
+
+
 def run(job, repo, results):
     print(f"\n{RULE}\n== {job['name']}\n{RULE}", flush=True)
     t0 = time.time()
-    rc = subprocess.run(job["run"], shell=True, cwd=f"{repo}/{job['cwd']}").returncode
+    cwd = os.path.join(repo, job["cwd"])
+    if not os.path.isdir(cwd):
+        results.append((job, False, 0.0))
+        print(f"-- FAIL (0s): {job['name']}: cwd `{job['cwd']}` is not a directory in the repo",
+              flush=True)
+        return False
+    rc = subprocess.run(job["run"], shell=True, cwd=cwd).returncode
     dt = time.time() - t0
     results.append((job, rc == 0, dt))
     print(f"-- {'PASS' if rc == 0 else 'FAIL'} ({dt:.0f}s): {job['name']}", flush=True)
@@ -135,20 +179,56 @@ def main():
     if not out(["git", "rev-parse", "--show-toplevel"], None).strip():
         sys.exit("not inside a git repo")
     repo = str(root())
-    plan_only = "--plan" in sys.argv
-    use_all = "--all" in sys.argv
+    args = sys.argv[1:]
+    unknown = [a for a in args if a not in ("--plan", "--all", "--trust")]
+    if unknown:
+        sys.exit(f"unknown argument {unknown[0]}\nusage: gate.py [--plan] [--all] | --trust")
+    plan_only = "--plan" in args
+    use_all = "--all" in args
 
-    jobs, not_local = read_jobs(load())
+    cfg = load()
+    jobs, not_local = read_jobs(cfg)
+    fp = fingerprint(cfg.get("gate"))
+    is_trusted = trusted(fp, repo)
+
+    if "--trust" in args:
+        if len(args) > 1:
+            sys.exit("--trust takes no other arguments")
+        print("Trusting this gate block (fingerprint "
+              f"{fp[:12]}) for this checkout. Its jobs:")
+        show_jobs(jobs, not_local)
+        if not is_trusted:
+            with open(trust_file(repo), "a") as f:
+                f.write(fp + "\n")
+        print("\nRecorded. Nothing was run; run the gate again to use it.")
+        return
+
+    if not is_trusted and not plan_only:
+        print("UNTRUSTED gate block: these shell commands come from the repo's workflow "
+              "config,\nand this checkout hasn't approved them (or they changed since). "
+              "Nothing was run.\n")
+        show_jobs(jobs, not_local)
+        print("\nShow the user every command above. Run `gate.py --trust` only after the "
+              "user approves,\nthen run the gate again.")
+        sys.exit(3)
 
     staged = changed("staged", repo)
     unstaged = changed("unstaged", repo)
     untracked = changed("untracked", repo)
     paths = sorted(set(staged + unstaged + untracked)) if use_all else staged
-    if not paths:
+    if not paths and not plan_only:
         sys.exit("nothing staged: stage what you intend to commit, or pass --all")
 
+    if plan_only:
+        print(f"trust: {'trusted' if is_trusted else 'NOT trusted; `--trust` after the user approves'}"
+              f" (fingerprint {fp[:12]})")
+        print("\nall configured jobs:")
+        show_jobs(jobs, not_local)
+        print()
     print(f"scope: {'all working-tree changes' if use_all else 'staged only'} "
           f"({len(paths)} file(s))")
+    if not paths:
+        print("  nothing staged: a real run would refuse until something is staged (or --all)")
 
     # The jobs read the working tree, not the index. Anything unstaged in a tested area
     # means the gate is checking something slightly different from the commit.
@@ -182,11 +262,10 @@ def main():
         print("      CI may still run it; run it by hand if you suspect drift.")
 
     print(f"\n{len(selected)} job(s) to run:")
-    for j in selected:
-        where = "" if j["cwd"] in (".", "") else f"  (in {j['cwd']})"
-        print(f"  - {j['name']}: {j['run']}{where}")
+    show_jobs(selected, [])
     if not selected:
-        print("  (none: no configured job covers these paths)")
+        print("  (none: no configured job covers these paths)" if paths
+              else "  (none: nothing in scope)")
 
     if plan_only:
         print("\n--plan: nothing executed.")

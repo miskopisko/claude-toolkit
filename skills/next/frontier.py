@@ -3,7 +3,9 @@
 
 Read-only. Resolves epic -> sub-issues -> (for any child carrying the spec label) that
 spec's own sub-issues, then reports each open ticket's labels, assignee and OPEN blocker
-count using GitHub's native issue dependencies. Ends with the long-lived branches
+count using GitHub's native issue dependencies. An empty `labels.ready` means no ready
+gate (unassigned and unblocked is takeable); an empty `labels.needsTriage` skips the
+triage check. Ends with the long-lived branches
 (`legacyBranches` in the workflow config) that hold commits not yet on the trunk.
 
 Usage:  python3 frontier.py <epic-number> [--repo owner/name] [--me <login>]
@@ -72,25 +74,25 @@ def detail(repo, number):
     }
 
 
-def legacy_report(trunk, patterns):
-    """Long-lived branches matching `patterns` that hold commits not on origin/<trunk>."""
+def legacy_report(remote, trunk, patterns):
+    """Long-lived branches on `remote` matching `patterns` that hold commits not on <remote>/<trunk>."""
     if not patterns:
         return
-    remote = (run(["git", "branch", "-r", "--format=%(refname:short)"]) or "").splitlines()
+    refs = (run(["git", "branch", "-r", "--format=%(refname:short)"]) or "").splitlines()
     hits = []
-    for ref in remote:
-        name = ref.removeprefix("origin/")
+    for ref in refs:
+        name = ref.removeprefix(f"{remote}/")
         if ref == name or name == "HEAD":
             continue
         if any(fnmatch.fnmatchcase(name, p) for p in patterns):
-            n = run(["git", "rev-list", "--count", f"origin/{trunk}..{ref}"])
+            n = run(["git", "rev-list", "--count", f"{remote}/{trunk}..{ref}"])
             if n and n != "0":
                 hits.append((ref, n))
     print(f"\n## LONG-LIVED BRANCHES NOT ON {trunk}  (patterns: {', '.join(patterns)})")
     if not hits:
         print("  none; every matching branch is fully on the trunk")
     for ref, n in hits:
-        print(f"  {ref}: {n} commit(s) not on origin/{trunk}")
+        print(f"  {ref}: {n} commit(s) not on {remote}/{trunk}")
 
 
 def main():
@@ -160,7 +162,8 @@ def main():
                 buckets["ASSIGNED TO OTHERS"].append(d)
             elif d["blocked_by"] > 0:
                 buckets["BLOCKED"].append(d)
-            elif ready & set(d["labels"]):
+            elif not ready or ready & set(d["labels"]):
+                # An empty ready set means no ready gate: unassigned + unblocked is takeable.
                 buckets["TAKEABLE NOW"].append(d)
             else:
                 # Open, unassigned, nothing blocking it, but no ready label, so it is
@@ -198,7 +201,7 @@ def main():
             print(f"   triage is for issues you did NOT create; these want {rl}, "
                   "or a blocker if they are waiting on something.")
 
-    legacy_report(cfg["trunk"], cfg.get("legacyBranches") or [])
+    legacy_report(cfg["remote"], cfg["trunk"], cfg.get("legacyBranches") or [])
 
 
 if __name__ == "__main__":
