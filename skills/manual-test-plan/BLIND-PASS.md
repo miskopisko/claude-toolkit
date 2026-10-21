@@ -23,17 +23,17 @@ Sections, in this order:
    - each role or permission the spec mentions, including being refused;
    - what is saved: reload the page and check it is still so; check history or audit entries the spec mentions;
    - races and stale data if the spec mentions concurrency, versions or recalculation;
-   - API behaviour (status codes, error messages) when the spec states it. Write each API call as its own step with a placeholder saying what the request does, e.g. `{{request: remove the override with a stale value, as an Editor}}`, then a check for the response. One request per case, including each one that should be refused. The logistics pass turns these into named requests.
+   - API behaviour (status codes, error messages) when the spec states it. Put each API call in the step's `requests` array as a placeholder saying what the request does, e.g. `"requests": ["{{request: remove the override with a stale value, as an Editor}}"]`, and follow the step with a check for the response. Don't name or describe the requests in the step's `text`. A step is done either by hand or by requests, never both: when an action mixes them (a request, then something in the app, then another request), make it one step per stretch, in order, each saying what it does and why. One request per case, including each one that should be refused. The logistics pass turns these into named requests.
 3. **`Regression`**: neighbouring behaviour the spec or docs say must keep working.
 4. **`Cleanup`**: put any data the run changed back the way it was.
 
 Writing each item:
 
-- A step is an action: "Click **Remove**", "Set the quantity to [[0]]". A check is something visible: on screen, in an API response, in a downloaded file, in the history.
+- A step is an action and the reason for it: "Set the quantity to [[0]], the lowest value the spec allows", "Put the claim in conflict, so the override has a newer value to clash with". Lead with what it achieves; keep the how to a short clause after it. A check is something visible: on screen, in an API response, in a downloaded file, in the history.
 - A check states the exact expected result from the spec: the value, the message, the status code. If the spec gives inputs and a rule, work out the expected value and show the arithmetic in the section intro. Never write "works correctly" or "behaves as expected".
 - Use the project's own words for things, from its glossary and docs.
 - Keep each section short enough to do in a few minutes. Split long ones.
-- Each section stands on its own. When it needs an action an earlier section already did (restore a record, sign in as another role, run the same request), write the step out again in full, with its own placeholder. Never write "repeat step 3b" or "run the request from section 3".
+- Each section stands on its own. When it needs an action an earlier section already did (restore a record, sign in as another role, run the same request), write the step out again in full, with its own placeholder. Never write "repeat step 3b", "same as 3b" or "run the request from section 3".
 - Say what data a case needs in `needs` ("an order that is already shipped", "a user with no orders") and refer to it in the items through a placeholder.
 
 **Questions.** When the spec is silent, vague or contradicts itself about something a check depends on, add an entry to `questions` and write the check against the most likely reading, saying so in the item. Don't invent requirements.

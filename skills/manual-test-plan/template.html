@@ -122,6 +122,9 @@
   }
   .snippet .label { color: var(--muted); }
   .snippet button { position: absolute; top: 5px; right: 5px; font-size: 12px; padding: 2px 8px; }
+  .reqs { margin-top: 6px; padding: 6px 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+  .reqs .label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+  .reqs div + div { margin-top: 2px; }
   textarea.notes {
     display: block; width: calc(100% - 28px); margin: 4px 14px 12px; min-height: 38px; resize: vertical;
     background: var(--code-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
@@ -255,8 +258,11 @@ function render() {
       const snip = it.snippet
         ? `<div class="snippet"><pre>${it.snippet.label ? `<span class="label">${esc(it.snippet.label)}</span>\n` : ''}${esc(it.snippet.text)}</pre><button data-copy="${encodeURIComponent(it.snippet.text)}">Copy</button></div>`
         : '';
+      const reqs = Array.isArray(it.requests) && it.requests.length
+        ? `<div class="reqs"><span class="label">${it.requests.length > 1 ? 'Run in the requests file, in order' : 'Run in the requests file'}</span>${it.requests.map((r) => `<div>${md(r)}</div>`).join('')}</div>`
+        : '';
       const kind = kindLabel[it.kind] ? it.kind : 'step';
-      li.innerHTML = `<div class="ctl">${ctl}</div><div class="text"><span class="kind ${kind}">${kindLabel[kind]}</span>${md(it.text)}${snip}</div>`;
+      li.innerHTML = `<div class="ctl">${ctl}</div><div class="text"><span class="kind ${kind}">${kindLabel[kind]}</span>${md(it.text)}${reqs}${snip}</div>`;
       ol.appendChild(li);
     });
     el.appendChild(ol);

@@ -98,18 +98,18 @@ Authorization: Bearer {{token}}
 
 ### ━━━━━━━━━━━━━━━━ C · Cleanup ━━━━━━━━━━━━━━━━
 
-### Ca · Clear the saved filter (expect 204), same as 3b
+### Ca · Clear the saved filter (expect 204)
 # @name clearFilterCa
 DELETE {{baseUrl}}/api/reports/17/filters
 Authorization: Bearer {{token}}
 ```
 
 - **One block per section, in page order.** Open each block with a banner: a `###` line holding the section's number and title between `━` rules, and nothing else, so neither client sends it. Skip sections that make no API call.
-- **A section's block holds every request that section runs, in the order its steps run them.** When a section needs a request again that an earlier one already has (restoring a record, signing in as another role), write it out again in full in this block, and say `same as 3b` in its title. Never send the user to another section's request.
+- **A section's block holds every request that section runs, in the order its steps run them.** When a section needs a request again that an earlier one already has (restoring a record, signing in as another role), write it out again in full in this block. Never send the user to another section's request, and don't point back to it either: no `same as 3b` in titles, comments or the page.
 - Title each request `### <section><letter> · <what it does> (expect <status>)`. `<section>` is the number its section's title starts with (`R` for Regression, `C` for Cleanup), and `<letter>` counts the requests within that block in order, repeats included: the first is `a`, the next `b`. Give it a `# @name` that ends with the same `<section><letter>`, so names stay unique when a request repeats.
 - Put the base URL, record ids used more than once, and auth in variables at the top. Work out how to get a token from the README, docs or auth setup, and say how in the comment above `@token`. Never write a real secret into the file: leave values the user has to supply empty, with a comment.
 - One request per call the plan makes, including each refused one, with the body that case needs. Don't rely on the user editing a request between steps; give each variant its own request.
-- In the plan, the step names the request ("Run **1a · Export a report you can't see** in the requests file") and the checks state what the response should be. Add a `facts` row linking the file: `[412-csv-export.http](412-csv-export.http)`, and say which clients run it.
+- In the plan, the step's `text` says what it does and why, and its `requests` lists the titles of the requests that do it, in order, without the `(expect …)` part: `"requests": ["**1a** · Export a report you can't see"]`. Never put request names in the step text. A step with `requests` has nothing to do by hand; if requests and actions in the app alternate, split the step so each stretch is its own step, in order (see `PLAN-FORMAT.md`). The checks state what the response should be. Add a `facts` row linking the file: `[412-csv-export.http](412-csv-export.http)`, and say which clients run it.
 
 ## 4. Pick real records
 

@@ -34,7 +34,7 @@
       "source": "./skills/manual-test-plan",
       "strict": false,
       "skills": ["./"],
-      "version": "0.2.0",
+      "version": "0.3.0",
       "description": "Build a manual test plan for the ticket you're on, as a web page to tick through: cases written from the spec, not the code, with real records from your local database.",
       "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
       "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/manual-test-plan",
