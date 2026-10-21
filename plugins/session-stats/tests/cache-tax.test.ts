@@ -4,7 +4,7 @@
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import type { CommandRunInput, ModelForkResult, On, PromptSubmitInput, SessionStartInput, TurnCompleteInput, TurnUsage } from 'claude-code'
 
-import { fmtDuration, freshState, parseDuration, resetForClear, seedFromResume } from '../hooks/cache-tax'
+import { fmtDuration, freshState, parseDuration, priceOf, resetForClear, seedFromResume } from '../hooks/cache-tax'
 
 tier('user')
 
@@ -87,6 +87,24 @@ describe('parse and format', () => {
     expect(fmtDuration(150 * MIN)).toBe('2h30m')
     expect(fmtDuration(7 * MIN)).toBe('7m')
     expect(fmtDuration((15 * 24 + 9) * 60 * MIN)).toBe('15d 9h')
+  })
+
+  test('prices: each family as itself, newer names before the family they extend', async () => {
+    expect(priceOf('claude-opus-5-5')).toEqual([0.2, 8, 20])
+    expect(priceOf('claude-opus-5')).toEqual([0.5, 10, 25])
+    expect(priceOf('claude-opus-4-1')).toEqual([1.5, 30, 75])
+    expect(priceOf('claude-opus-4-8')).toEqual([0.5, 10, 25])
+    expect(priceOf('claude-sonnet-5-5')).toEqual([0.1, 4, 10])
+    expect(priceOf('claude-sonnet-4-6')).toEqual([0.3, 6, 15])
+    expect(priceOf('Claude Haiku 4.5')).toEqual([0.1, 2, 5])
+    expect(priceOf('claude-mythos-5-1')).toEqual([0.25, 20, 50])
+    expect(priceOf('gpt-5')).toBe(null)
+  })
+
+  test('prices: Haiku 5.5 pays its higher rates on a prompt over 100,000 tokens', async () => {
+    expect(priceOf('claude-haiku-5-5', 100_000)).toEqual([0.01, 0.2, 0.5])
+    expect(priceOf('claude-haiku-5-5', 100_001)).toEqual([0.05, 1, 2.5])
+    expect(priceOf('claude-opus-5-5', 900_000)).toEqual([0.2, 8, 20])
   })
 })
 
@@ -271,7 +289,7 @@ describe('keepwarm', () => {
     expect(s.text).toMatch(/stopped/)
   })
 
-  test('stops when the engine returns null, a cold snapshot or an API error', async ($, on) => {
+  test('stops when the engine returns null', async ($, on) => {
     const clock = mock.clock(on, { now: START })
     const w = world(on, [null])
     await $.session.start(session)
@@ -280,6 +298,35 @@ describe('keepwarm', () => {
     await clock.advance(50 * MIN)
     expect(w.forks.length).toBe(1)
     expect(w.status.at(-1)).toMatch(/either the snapshot was cold or the API call failed/)
+  })
+
+  const failures: Array<[ModelForkResult, RegExp]> = [
+    // The ping reads only the reason and status of a failure; the rest of it is left out.
+    [{ isAnswered: false, reason: 'api-error', status: 529 } as unknown as ModelForkResult, /^keepwarm stopped: the API call failed \(529\)$/],
+    [{ isAnswered: false, reason: 'nothing-to-fork' }, /^keepwarm stopped: no conversation to warm yet$/],
+  ]
+  for (const [answer, says] of failures) {
+    test(`stops when the fork is not answered: ${answer.isAnswered ? '' : answer.reason}`, async ($, on) => {
+      const clock = mock.clock(on, { now: START })
+      const w = world(on, [answer])
+      await $.session.start(session)
+      await $.command.run(run('keepwarm', '1h'))
+      await $.turn.complete(turn())
+      await clock.advance(50 * MIN)
+      expect(w.forks.length).toBe(1)
+      expect(w.status.at(-1)).toMatch(says)
+      await clock.advance(50 * MIN)
+      expect(w.forks.length).toBe(1)
+    })
+  }
+
+  test('every takes a period under the one-hour TTL', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [])
+    await $.session.start(session)
+    expect((await $.command.run(run('keepwarm', '6h every 2h'))).text).toBe('every takes a period from 1m to 59m')
+    expect((await $.command.run(run('keepwarm', '6h every 60m'))).text).toBe('every takes a period from 1m to 59m')
+    expect((await $.command.run(run('keepwarm', '6h every 59m'))).text).toMatch(/^keepwarm on for 6h00m/)
   })
 
   test('the window ends on its own, forgetting the every knob, and off cancels', async ($, on) => {
@@ -560,7 +607,7 @@ describe('store per session', () => {
     expect(w.forks.length).toBe(1)
   })
 
-  test('a window that lapsed less than a week ago is left for its own session', async ($, on) => {
+  test('another session\'s lapsed window is left for that session', async ($, on) => {
     const now = START + 30 * 24 * HOUR
     mock.clock(on, { now })
     const store = new Map<string, unknown>([['deadline:recent', now - HOUR], ['every:recent', MIN]])

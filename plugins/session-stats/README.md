@@ -23,9 +23,9 @@ installed separately, uninstall it so the guard doesn't run twice.
 - **Tokens**: new input, cached input, cache writes, output and request counts,
   for the main session and for agents.
 - **Prompt cache**: the cache hit rate for the last request and for the whole
-  session, the read/write/new split, how long the session has been idle, and
-  what the cache saved: reads priced against the base input rate, less the
-  premium paid on cache writes.
+  session (main session and agents), the read/write/new split, how long the
+  session has been idle, and what the cache saved: reads priced against the
+  base input rate, less the premium paid on cache writes.
 - **Cache tax**: whether the one-hour cache is warm (and for how long) or
   cold, what re-writing it would cost against a warm turn, the keepwarm
   window and next ping, the last ping's cost, the guard mode, and the cold
@@ -61,7 +61,7 @@ The pane opens by itself when the terminal is at least 144 columns wide.
     /keepwarm               keep the cache warm for six hours
     /keepwarm 90m           keep it warm for a window of your own (also 2h30m, 6h)
     /keepwarm always        arm a six-hour window at every session start
-    /keepwarm 6h every 2m   ping every two minutes (a testing knob, floor 1m)
+    /keepwarm 6h every 2m   ping every two minutes (a testing knob, 1m to 59m)
     /keepwarm status        the window, next ping and last ping
     /keepwarm off           stop, and turn always off
     /cache-tax              the cache card: state, cold cost, keepwarm, tally
@@ -74,8 +74,14 @@ request over the conversation so the cache is read rather than re-written.
 gone. A cold write that gets paid arms keepwarm for three hours.
 
 The guard steps in only when the context is at least 50,000 tokens and the
-one-hour clock says the cache is cold. Prices are list prices from September
-2026, and the cold cost is an upper bound.
+one-hour clock says the cache is cold. The cold cost is an upper bound.
+
+Prices are the Claude API list prices on
+[Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing),
+read 2026-10-21, including Haiku 5.5's higher rates for a prompt over 100,000
+tokens. Cloud-provider and US-only (`inference_geo`) pricing differ. Older
+Sonnet and Haiku models the page no longer lists are priced as Sonnet 4 and
+Haiku 4.5.
 
 Keepwarm assumes a one-hour cache. Subscription usage defaults to one hour;
 for API-key or cloud-provider sessions, set `promptCacheTtl` to `"1h"`.
@@ -97,8 +103,9 @@ turns them off in every session; `/session-stats alerts on` turns them back on.
 When a turn runs two minutes or longer, a desktop notification says so when it
 finishes, with the first line of the answer, so you can step away during long
 runs. It goes through your own notification channel (`preferredNotifChannel`);
-an interrupted turn sends none. `/session-stats notify off` turns it off in
-every session; `/session-stats notify on` turns it back on.
+a turn that was interrupted or ended in an API error sends none.
+`/session-stats notify off` turns it off in every session;
+`/session-stats notify on` turns it back on.
 
 ### Controls
 
@@ -106,6 +113,7 @@ The pane's Controls section holds four switches. Click one, or focus the pane
 (ctrl+x tab) and press its key:
 
     k  keepwarm   on arms a six-hour window, as /keepwarm; off as /keepwarm off
+                  (shown once cache-tax has started, just after the session does)
     g  guard      refuse a cold send once, or only warn
     a  alerts     the transcript alerts above
     n  notify     the done notification
@@ -114,13 +122,18 @@ Each is remembered across sessions, the same as its slash command.
 
 ## Notes
 
-- Token and tool counts start when the plugin loads. Cost, context and usage
-  limits come from Claude Code itself, so those are always complete.
+- Token, tool, turn and savings counts start when the plugin loads and run on
+  through `/clear`. A `/clear` starts the prompt cache rows (last request, idle
+  time) and the compaction count over, along with cache-tax's clock and tally.
+  Cost, context and usage limits come from Claude Code itself, so those are
+  always complete.
 - Cache savings are priced at list prices, with cache writes at the
   one-hour rate (as cache-tax assumes). On a five-minute cache the write
   premium is a quarter of that, so the net saving is understated.
-- The pane's clock ticks once a second, only while the pane is on screen. The
-  agent list is refreshed every 2 seconds while it ticks.
+- The pane's clock ticks once a second from the pane's first draw until it is
+  closed (`/session-stats close` or its close mark), even while another pane's
+  tab is in front. A pane never drawn costs nothing. The agent list is
+  refreshed every 2 seconds while it ticks.
 - Where an organization manages Claude Code, plugins you install don't receive
   the resume and compaction events, so cache-tax can't use a resumed session's
   timing or reset itself after a compaction there.
@@ -134,6 +147,14 @@ the pane's state types in `types/index.d.ts`.
 
     claude plugin validate .
     claude plugin test .
+    tsc -p .
+
+`tsconfig.json` extends `.claude-plugin/types/tsconfig.json`, which is not in
+git: Claude Code writes `.claude-plugin/types/` (the plugin API's typings and
+that tsconfig) each time it loads the plugin from a folder you own. On a fresh
+clone, start one session with it loaded before running `tsc`:
+
+    claude --plugin-dir .
 
 ## License
 

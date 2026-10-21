@@ -18,8 +18,8 @@ const run = (args: string): CommandRunInput => ({
   command: 'session-stats', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 },
 })
 
-const turn = (durationMs: number, over: { answer?: string; isAborted?: boolean } = {}): TurnCompleteInput => ({
-  answer: over.answer ?? 'All tests pass.\nDetails follow.', durationMs, isAborted: over.isAborted ?? false, turnId: 't1', reason: 'answer',
+const turn = (durationMs: number, over: { answer?: string; isAborted?: boolean; reason?: 'answer' | 'error' } = {}): TurnCompleteInput => ({
+  answer: over.answer ?? 'All tests pass.\nDetails follow.', durationMs, isAborted: over.isAborted ?? false, turnId: 't1', reason: over.reason ?? 'answer',
 })
 
 // The engine beneath the plugin, enough for session start, the pane and a turn's end.
@@ -92,13 +92,24 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+describe('/session-stats', () => {
+  test('an unknown word answers with the usage instead of opening the pane', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on)
+    await start($)
+    expect((await $.command.run(run('alert off'))).text).toBe('Usage: /session-stats [close | alerts on|off | notify on|off]')
+    expect((await $.command.run(run(''))).text).toMatch(/^Session stats pane is waiting to be placed/)
+  })
+})
+
 describe('done notification', () => {
-  test('a long turn notifies with its first line; a short or interrupted one does not', async ($, on) => {
+  test('a long turn notifies with its first line; a short, interrupted or failed one does not', async ($, on) => {
     mock.clock(on, { now: START })
     const { notified } = world(on)
     await start($)
     await $.turn.complete(turn(90 * 1000))
     await $.turn.complete(turn(5 * MIN, { isAborted: true }))
+    await $.turn.complete(turn(5 * MIN, { reason: 'error' }))
     await $.turn.complete(turn(3 * MIN + 12_000))
     expect(notified).toEqual([{ text: 'Done after 3m12s: All tests pass.', title: 'Claude Code' }])
   })

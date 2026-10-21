@@ -21,16 +21,40 @@ const KEY_ALWAYS = 'always'
 
 const cacheTaxView = atom({ plugin: 'session-stats', key: 'cacheTax' } as const, null as CacheTaxView | null)
 
-// $ per million tokens, [cache read, 1h cache write, output], list prices September 2026.
+// $ per million tokens, [cache read, 1h cache write, output]: Claude API list prices from
+// https://platform.claude.com/docs/en/about-claude/pricing, read 2026-10-21. The base
+// input rate is half the 1h write rate on every row.
 // Longer family names first: a model id matches the first row it contains.
 const PRICES: Array<[string, number, number, number]> = [
   ['fable-5-1', 0.25, 20, 50],
+  ['mythos-5-1', 0.25, 20, 50],
   ['fable-5', 1, 20, 50],
+  ['mythos-5', 1, 20, 50],
+  ['opus-5-5', 0.2, 8, 20],
   ['opus-5', 0.5, 10, 25],
-  ['opus-4', 0.5, 10, 25],
+  ['opus-4-8', 0.5, 10, 25],
+  ['opus-4-7', 0.5, 10, 25],
+  ['opus-4-6', 0.5, 10, 25],
+  ['opus-4-5', 0.5, 10, 25],
+  // Opus 4 and 4.1, retired on the Claude API.
+  ['opus-4', 1.5, 30, 75],
+  ['sonnet-5-5', 0.1, 4, 10],
   ['sonnet-5', 0.2, 4, 10],
+  ['sonnet-4', 0.3, 6, 15],
+  // Older Sonnets, not on the pricing page: priced as Sonnet 4.
   ['sonnet', 0.3, 6, 15],
+  ['haiku-5-5', 0.01, 0.2, 0.5],
+  ['haiku-4', 0.1, 2, 5],
+  ['haiku-3-5', 0.08, 1.6, 4],
+  ['3-5-haiku', 0.08, 1.6, 4],
+  // Older Haikus, not on the pricing page: priced as Haiku 4.5.
   ['haiku', 0.1, 2, 5],
+]
+
+// A request whose prompt (input, cache reads and cache writes together) is over `over`
+// tokens pays these prices instead, the whole request at the higher rate.
+const LONG_PROMPT: Array<[string, number, [number, number, number]]> = [
+  ['haiku-5-5', 100_000, [0.05, 1, 2.5]],
 ]
 
 type PingRecord = { at: number; read: number; write: number; usd: number | null; warm: boolean }
@@ -55,10 +79,18 @@ export type State = {
   stopped: string | null
 }
 
-export function priceOf(model: string | null): [number, number, number] | null {
+/** The prices of `model` for a request whose prompt is `promptTokens` long; null for a model with no row. */
+export function priceOf(model: string | null, promptTokens = 0): [number, number, number] | null {
   const m = (model ?? '').toLowerCase().replace(/[\s.]+/g, '-')
-  for (const [family, read, write, output] of PRICES) if (m.includes(family)) return [read, write, output]
-  return null
+  const family = PRICES.find(([f]) => m.includes(f))
+  if (family === undefined) return null
+  const long = LONG_PROMPT.find(([f, over]) => f === family[0] && promptTokens > over)
+  return long === undefined ? [family[1], family[2], family[3]] : long[2]
+}
+
+/** A response's prompt length: what the long-prompt tier is measured on. */
+export function promptOf(u: { input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }): number {
+  return u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
 }
 
 export function parseDuration(text: string): number | null {
@@ -84,12 +116,12 @@ function fmtTok(n: number): string {
 }
 
 function coldUsd(s: State): number | null {
-  const price = priceOf(s.lastModel)
+  const price = priceOf(s.lastModel, s.ctx)
   return price ? s.ctx * price[1] / 1e6 : null
 }
 
 function warmUsd(s: State): number | null {
-  const price = priceOf(s.lastModel)
+  const price = priceOf(s.lastModel, s.ctx)
   return price ? s.ctx * price[0] / 1e6 : null
 }
 
@@ -100,7 +132,7 @@ function pingUsd(u: { input_tokens: number; output_tokens: number; cache_read_in
 
 /** The read-only upper bound: pings at the cache-read rate that cost as much as one cold write of the same context. */
 function breakEvenPings(s: State): number | null {
-  const price = priceOf(s.lastModel)
+  const price = priceOf(s.lastModel, s.ctx)
   if (!price || s.ctx <= 0) return null
   return Math.floor(price[1] / price[0])
 }
@@ -110,7 +142,7 @@ function isCold(s: State, now: number): boolean {
 }
 
 function guardText(s: State, now: number): string {
-  const price = priceOf(s.lastModel)
+  const price = priceOf(s.lastModel, s.ctx)
   const rate = price ? `$${price[1]}/MTok` : 'the cache-write rate'
   const warm = warmUsd(s)
   return `the prompt cache went cold ${fmtDuration(now - s.lastRequestAt - TTL_MS)} ago. Sending this re-writes ` +
@@ -268,7 +300,7 @@ async function ping($: EngineInterface, s: State) {
     return stop($, s, reason)
   }
   const u = reply.usage
-  const price = priceOf(s.lastModel)
+  const price = priceOf(s.lastModel, promptOf(u))
   // A warm ping reads the prefix and writes only its own message; a write of a tenth of the read or more means the prefix broke.
   const warm = u.cache_read_input_tokens > 0 && u.cache_creation_input_tokens < 0.1 * u.cache_read_input_tokens
   const usd = price ? pingUsd(u, price) : null
@@ -303,6 +335,12 @@ export async function keepwarmOn($: EngineInterface, s: State) {
 /** Stops keepwarm and turns always off, as /keepwarm off does. */
 export async function keepwarmOff($: EngineInterface, s: State) {
   await stop($, s, null, true)
+}
+
+/** Turns keepwarm off while a window is live, else arms one: the pane's keepwarm button. Read from the state and the clock now, not from a drawing, so a window past its end reads as off. */
+export async function keepwarmToggle($: EngineInterface, s: State) {
+  if (s.deadline > (await $.clock.now())) await keepwarmOff($, s)
+  else await keepwarmOn($, s)
 }
 
 /** Sets the guard mode and remembers it across sessions. */
@@ -358,7 +396,7 @@ export async function cacheTaxSessionStart($: EngineInterface, s: State) {
   await $.command.register({
     name: 'keepwarm',
     description: 'Keep the prompt cache warm: bare for 6h, a window such as 90m, always, off, or status (session-stats)',
-    argumentHint: '[6h | always | off | status]',
+    argumentHint: '[6h [every 2m] | always | off | status]',
     immediate: true,
   })
   await $.command.register({
@@ -402,7 +440,7 @@ export async function cacheTaxTurnComplete($: EngineInterface, s: State, e: Turn
     s.ctx = live && live > 0 ? live : u.input_tokens + u.cache_read_input_tokens + write
     const full = prev > 20000 && write >= 0.5 * prev
     if (full || s.coldWritePending) {
-      const price = priceOf(s.lastModel)
+      const price = priceOf(s.lastModel, s.ctx)
       const usd = price ? write * price[1] / 1e6 : null
       s.misses.push({ at: now, tokens: write, usd })
       if (s.deadline < now + AUTO_WARM_MS) {
@@ -475,7 +513,8 @@ export function hookCacheTax(on: On, s: State) {
       let every = PING_AFTER_MS
       if (words[1] === 'every') {
         const period = parseDuration(words[2] ?? '')
-        if (period == null || period < MIN_PING_MS) return { text: 'every takes a period of at least 1m' }
+        // A period of the TTL or more lands every ping on a cache already cold, so none is ever sent.
+        if (period == null || period < MIN_PING_MS || period >= TTL_MS) return { text: 'every takes a period from 1m to 59m' }
         every = period
       }
       await startWindow($, s, window, every)

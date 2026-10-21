@@ -124,6 +124,26 @@ for (const surface of ['terminal', 'desktop'] as const) {
       expect(await ui.find({ text: /^\$8\.75 net$/ })).toBeDefined()
       expect(await ui.find({ text: /\$9\.75 on reads · \$1\.00 on writes/ })).toBeDefined()
     })
+
+    test('/clear forgets the last request; the counts run on', async ($, on) => {
+      mock.clock(on, { now: START })
+      world(on)
+      on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+      on('turn.step', async function* ($, e) {
+        return {
+          turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const,
+          usage: usage({ input_tokens: 10, cache_read_input_tokens: 90 }),
+        }
+      })
+      const step = $.turn.step({ turnId: 't1', index: 0, model: 'claude-fable-5-1', messageCount: 1 })
+      for await (const _ of step);
+      await step.result
+      const ui = await mount($)
+      expect(await ui.find({ text: /^90% hit$/ })).toBeDefined()
+      await $.session.end({ reason: 'clear', sessionId: 'S1', resume: { id: 'S1' } })
+      expect(await ui.find({ text: /No request yet/ })).toBeDefined()
+      expect(await ui.find({ text: /^1 main · 0 agents$/ })).toBeDefined()
+    })
   })
 }
 

@@ -22,9 +22,9 @@ import {
   cacheTaxTurnStep,
   freshState,
   hookCacheTax,
-  keepwarmOff,
-  keepwarmOn,
+  keepwarmToggle,
   priceOf,
+  promptOf,
   setGuard,
 } from './cache-tax'
 import { addSample, cacheSavings, perHour } from './pace'
@@ -129,8 +129,8 @@ async function pollAgents($: EngineInterface) {
   })
 }
 
-// The pane's clock: one tick a second, run only while the pane is drawn, so a
-// hidden pane costs nothing. The agent list is polled on every other tick.
+// The pane's clock: one tick a second, from the pane's first draw until it is
+// closed, so a pane never drawn costs nothing. The agent list is polled on every other tick.
 let ticker: Timer | null = null
 
 function startTicker($: EngineInterface) {
@@ -213,7 +213,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'session-stats',
-      description: 'Toggle the session stats pane (/session-stats close hides it; alerts on|off, notify on|off)',
+      description: 'Open the session stats pane (/session-stats close hides it; alerts on|off, notify on|off)',
       argumentHint: '[close | alerts on|off | notify on|off]',
     })
     const [alertsOff, notifyOff] = await Promise.all([$.store.get(SETTING_KEYS.alerts), $.store.get(SETTING_KEYS.notify)])
@@ -250,6 +250,7 @@ export const register: Register = on => {
       stopTicker()
       return { text: 'Session stats pane closed.' }
     }
+    if ((name ?? '') !== '') return { text: 'Usage: /session-stats [close | alerts on|off | notify on|off]' }
     const opened = await $.ui.open({ id: PANE, title: TITLE, columns: WIDTH })
     return {
       text: opened.isPlaced
@@ -262,6 +263,17 @@ export const register: Register = on => {
     const closed = await next(e)
     stopTicker()
     return closed
+  }).catch(($, e, next) => next(e))
+
+  // /clear starts a new conversation in the same process: its prompt cache and compactions start over;
+  // the token, tool and turn counts run on for the whole process.
+  on('session.end', async ($, e, next) => {
+    const ended = await next(e)
+    if (e.reason === 'clear') {
+      await update($, tokens, t => ({ ...t, last: null }))
+      await update($, turn, t => ({ ...t, compactions: 0 }))
+    }
+    return ended
   }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
@@ -289,7 +301,8 @@ export const register: Register = on => {
       const prefs = await read($, settings)
       if (costly !== null && prefs.alerts) say($, costly)
       await raiseAlerts($, alerts)
-      if (prefs.notify && !e.isAborted && e.durationMs >= NOTIFY_AFTER_MS) {
+      // An interrupted turn, or one an API error ended, did not finish: nothing to announce.
+      if (prefs.notify && !e.isAborted && e.reason !== 'error' && e.durationMs >= NOTIFY_AFTER_MS) {
         await notifyDone($, e.durationMs, e.reason === 'refusal' ? 'the model declined' : e.answer)
       }
     } else {
@@ -315,7 +328,7 @@ export const register: Register = on => {
     const u = result.usage
     if (u !== null) {
       const at = await $.clock.now()
-      const price = priceOf(u.model)
+      const price = priceOf(u.model, promptOf(u))
       const saved = price === null ? null : cacheSavings(u, price)
       await update($, savings, v =>
         saved === null
@@ -427,7 +440,11 @@ export const register: Register = on => {
     // Cache
     const last = tk.last
     const lastHit = last === null ? null : hitRate(last)
-    const allHit = hitRate(tk.main)
+    const allHit = hitRate({
+      input: tk.main.input + tk.agents.input,
+      cacheRead: tk.main.cacheRead + tk.agents.cacheRead,
+      cacheWrite: tk.main.cacheWrite + tk.agents.cacheWrite,
+    })
     const age = last === null ? null : at - last.at
     // Warm or cold by the clock now, not as of cache-tax's last change: the cache lapses with nothing happening.
     const netSaved = sv.readsUsd - sv.premiumUsd
@@ -509,7 +526,7 @@ export const register: Register = on => {
         {last === null ? (
           <Text dimColor>No request yet.</Text>
         ) : (
-          <>
+          <Box flexDirection="column">
             {row("Last request", `${lastHit ?? 0}% hit`, lastHit !== null && lastHit >= 70 ? 'success' : 'warning')}
             <Text dimColor>
               {'             '}
@@ -531,14 +548,14 @@ export const register: Register = on => {
                 </Text>
               </>
             )}
-          </>
+          </Box>
         )}
 
         {head('Cache tax')}
         {ct === null ? (
           <Text dimColor>Starting…</Text>
         ) : (
-          <>
+          <Box flexDirection="column">
             {row(
               'Cache',
               cacheState === 'unknown'
@@ -578,7 +595,7 @@ export const register: Register = on => {
               `${ct.coldWrites} paid${ct.coldWrites > 0 ? `, ${usd(ct.paidUsd)}` : ''}`,
               ct.coldWrites > 0 ? 'warning' : undefined,
             )}
-          </>
+          </Box>
         )}
 
         {head('Tools')}
@@ -595,7 +612,7 @@ export const register: Register = on => {
         {shownAgents.length === 0 ? (
           <Text dimColor>None this session.</Text>
         ) : (
-          <>
+          <Box flexDirection="column">
             <Text dimColor>
               {active.length} running · {finished.length} finished
             </Text>
@@ -616,7 +633,7 @@ export const register: Register = on => {
                 </Box>
               )
             })}
-          </>
+          </Box>
         )}
 
         {head('Controls')}
@@ -630,7 +647,7 @@ export const register: Register = on => {
                 plain
                 hotkey="k"
                 label={`keepwarm ${ct.deadline === null ? 'off' : 'on'}`}
-                onPress={() => (cacheTax.deadline ? keepwarmOff($, cacheTax) : keepwarmOn($, cacheTax))}
+                onPress={() => keepwarmToggle($, cacheTax)}
               />
             )}
           </Box>
