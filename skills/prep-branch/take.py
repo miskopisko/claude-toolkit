@@ -63,7 +63,11 @@ def main():
         return
     try:
         b = board.find_board(repo, cfg["board"]["name"])
-        print("  " + board.move(repo, n, board.column_name(cfg, "inProgress"), b, dry_run))
+        column = board.column_name(cfg, "inProgress")
+        line, wrote = board.move(repo, n, column, b, dry_run)
+        print("  " + line, flush=True)
+        for line in board.settle(repo, [n] if wrote else [], column, b):
+            print("  " + line)
     except board.BoardError as e:
         sys.exit(f"  ⛔ {e}")
 

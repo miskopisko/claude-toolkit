@@ -9,6 +9,9 @@ Writes to the tracker, and only to the card's Status field: assignees, labels an
 itself are untouched. Idempotent: a card already in the column is left alone, and a ticket
 missing from the board is added to it. The board and its columns are looked up by name on
 each run, so a renamed column fails loudly instead of landing the card in the wrong place.
+A board's own workflows can move a card straight back (GitHub's "Pull request linked to
+issue" fires a few seconds after a PR opens), so after a move it waits, reads the card
+again, and puts it back if it was moved, saying so.
 The board may belong to an organization or a user: the repository's owner is searched
 first, then the projects linked to the repository, then your own.
 
@@ -22,10 +25,15 @@ Usage:  python3 board.py <ticket>... [--to inProgress|inReview|"<column>"] [--re
 import json
 import subprocess
 import sys
+import time
 
 from workflow import load
 
 STATUS_FIELD = "Status"
+# A board workflow answers a move or a PR link within a few seconds; wait this long before re-reading.
+SETTLE_S = 10
+# How many times to put a card back before giving up on it.
+RETRIES = 2
 
 _FRAGMENT = """
 fragment B on ProjectV2 {
@@ -125,23 +133,62 @@ def current(repo, n, board):
     return t, item, status
 
 
-def move(repo, n, column, board, dry_run=False):
-    """Put ticket n's card in `column` on `board`, adding the card if it's missing. Returns a line to print."""
+def _option(board, column):
     option = next((o for o in board["field"]["options"] if o["name"] == column), None)
     if not option:
         names = ", ".join(o["name"] for o in board["field"]["options"])
         raise BoardError(f"'{board['title']}' has no '{column}' column (has: {names})")
+    return option
+
+
+def _set(board, item, option):
+    _graphql(SET, project=board["id"], item=item["id"], field=board["field"]["id"], option=option["id"])
+
+
+def move(repo, n, column, board, dry_run=False):
+    """Put ticket n's card in `column` on `board`, adding the card if it's missing.
+
+    Returns (a line to print, whether it wrote anything)."""
+    option = _option(board, column)
     t, item, status = current(repo, n, board)
     label = f"#{n} {board['title']}"
     if status == column:
-        return f"{label}: {column} (already)"
+        return f"{label}: {column} (already)", False
     was = status or ("(no status)" if item else "(not on the board)")
     if dry_run:
-        return f"{label}: {was} → {column} (dry run: nothing changed)"
+        return f"{label}: {was} → {column} (dry run: nothing changed)", False
     if not item:
         item = _graphql(ADD, project=board["id"], content=t["id"])["addProjectV2ItemById"]["item"]
-    _graphql(SET, project=board["id"], item=item["id"], field=board["field"]["id"], option=option["id"])
-    return f"{label}: {was} → {column}"
+    _set(board, item, option)
+    return f"{label}: {was} → {column}", True
+
+
+def settle(repo, tickets, column, board):
+    """After moving `tickets`, wait for the board's workflows, then put back any card they moved.
+
+    Returns a line to print for each card that was moved back; raises if one won't stay."""
+    lines, pending = [], list(tickets)
+    for _ in range(RETRIES + 1):
+        if not pending:
+            break
+        time.sleep(SETTLE_S)
+        moved_back = []
+        for n in pending:
+            _, item, status = current(repo, n, board)
+            if status != column:
+                moved_back.append((n, item, status))
+        if not moved_back:
+            return lines
+        pending = []
+        for n, item, status in moved_back:
+            _set(board, item, _option(board, column))
+            lines.append(f"#{n} {board['title']}: the board moved it to {status or '(no status)'}; "
+                         f"put back in {column}")
+            pending.append(n)
+    if pending:
+        raise BoardError(f"{', '.join(f'#{n}' for n in pending)} keeps being moved off {column} "
+                         f"by a workflow on '{board['title']}' (the project's ⋯ → Workflows)")
+    return lines
 
 
 def _take(args, flag, default):
@@ -173,8 +220,14 @@ def main():
     column = column_name(cfg, to)
     try:
         board = find_board(repo, cfg["board"]["name"])
+        moved = []
         for n in tickets:
-            print(move(repo, n, column, board, dry_run))
+            line, wrote = move(repo, n, column, board, dry_run)
+            print(line, flush=True)
+            if wrote:
+                moved.append(n)
+        for line in settle(repo, moved, column, board):
+            print(line)
     except BoardError as e:
         sys.exit(f"⛔ {e}")
 

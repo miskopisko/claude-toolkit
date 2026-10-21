@@ -151,7 +151,11 @@ python3 ${CLAUDE_SKILL_DIR}/board.py <ticket>... --to inReview    # every ticket
 
 It moves each ticket's card to the board's `inReview` column, adding the card to the board
 if it's missing, and leaves a card already there alone. It changes nothing else on the
-ticket. **With no `board` in the config it moves nothing and says so; say so in the report
+ticket. It then waits about 10 seconds and reads the cards again, because a board's own
+workflows (GitHub's "Pull request linked to issue", for one) can move a card back once the
+PR is linked. It puts back any card they moved and says so; report that too, and suggest
+the user change that workflow in the project's ⋯ → Workflows. If a card keeps being moved
+back, it stops with a `⛔` naming the workflow page. **With no `board` in the config it moves nothing and says so; say so in the report
 too.** If it fails for lack of the `project` scope, give the fix (`gh auth refresh -s project`).
 A follow-up commit to a PR that's already open skips this step: its cards moved when the
 PR opened.

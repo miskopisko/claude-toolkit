@@ -123,8 +123,9 @@ python3 ${CLAUDE_SKILL_DIR}/take.py <n>
 ```
 
 It assigns the ticket to the user and, when the config has a `board`, moves its card to
-the board's `inProgress` column, adding the card to the board if it's missing. With no
-`board` it only assigns, and says so. Anything already right is left alone. It refuses a
+the board's `inProgress` column, adding the card to the board if it's missing, then waits
+about 10 seconds and puts the card back if one of the board's own workflows moved it, saying
+so. With no `board` it only assigns, and says so. Anything already right is left alone. It refuses a
 ticket assigned to someone else. Preflight raises that as a `⛔`, so it only fires if the
 user overrode the `⛔` without saying to take the ticket over.
 
