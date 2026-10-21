@@ -1,6 +1,6 @@
 {
   "name": "desk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A work pane for the branch you're on: its GitHub issue and acceptance criteria, its PR's checks, review and open threads, and your local dev services, plus a where-you-left-off note at each session start. /desk opens it, /stack runs the services.",
   "author": {
     "name": "Michael Piskuric"

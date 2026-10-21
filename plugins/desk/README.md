@@ -27,9 +27,10 @@ come from a small config file each project writes for itself.
 - **Last session**: when you last worked in this repository, and your last
   prompts there.
 
-The issue and PR numbers are links. `r` refreshes, `i` opens the issue and `p`
-opens the PR in the browser. Click a key, or focus the pane (ctrl+x tab) and
-press it.
+The issue and PR numbers are links. Past eight criteria the rest fold under
+"+N more"; `c` lists them all, and again folds them. `r` refreshes, `i` opens
+the issue and `p` opens the PR in the browser. Click a key, or focus the pane
+(ctrl+x tab) and press it.
 
 ### Where you left off
 

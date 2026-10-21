@@ -112,6 +112,8 @@ declare module 'claude-code' {
       now: number
       /** The session id the where-you-left-off note was last sent in. */
       notedSession: string | null
+      /** Whether the pane lists every criterion rather than the first few. */
+      criteriaOpen: boolean
     }
   }
 }

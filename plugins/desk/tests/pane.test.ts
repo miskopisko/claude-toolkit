@@ -58,7 +58,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 const fail = (stderr: string) => ({ value: { exitCode: 1, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } })
 
 /** git and gh as a repository with a PR and its issue answer them; `seen` collects each argv. */
-function fakeHost(on: On, seen: string[][] = [], withPr = true, pr: object = PR, hasProjectScope = true) {
+function fakeHost(on: On, seen: string[][] = [], withPr = true, pr: object = PR, hasProjectScope = true, issue: object = ISSUE) {
   on('process.run', (_$, e) => {
     const argv = [...e.argv]
     seen.push(argv)
@@ -72,7 +72,7 @@ function fakeHost(on: On, seen: string[][] = [], withPr = true, pr: object = PR,
       return ok(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: false }, { isResolved: true }] } } } } }))
     if (line.startsWith('gh issue view') && line.includes('projectItems') && !hasProjectScope)
       return fail('error: your authentication token is missing required scopes [read:project]\nTo request it, run: gh auth refresh -s read:project')
-    if (line.startsWith('gh issue view')) return ok(JSON.stringify(ISSUE))
+    if (line.startsWith('gh issue view')) return ok(JSON.stringify(issue))
     return fail(`unexpected: ${line}`)
   })
 }
@@ -172,4 +172,23 @@ test('the left-off note rides beside the first prompt of a conversation only', a
   await prompt('again')
   expect(contexts[0]?.[0]).toContain('Branch: implement/7-thing')
   expect(contexts[1]).toBeUndefined()
+})
+
+test('past eight criteria, the rest fold under a key that lists them all', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  fakeSession(on)
+  const body = '## Acceptance criteria\n' + Array.from({ length: 10 }, (_, i) => `- [ ] item ${i + 1}`).join('\n')
+  fakeHost(on, [], true, PR, true, { ...ISSUE, body })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+  const ui = await $.ui.mount({ plugin: 'desk', surface: 'terminal', component: 'Pane', requestId: 'desk', props: PANE })
+  await $.command.run(REFRESH)
+
+  expect(await ui.find({ text: /item 8$/ })).toBeDefined()
+  expect(await ui.find({ text: /item 10$/ })).toBeUndefined()
+  expect(await ui.find({ text: '+2 more' })).toBeDefined()
+  await ui.press({ key: 'criteria-toggle' })
+  expect(await ui.find({ text: /item 10$/ })).toBeDefined()
+  expect(await ui.find({ text: 'show fewer' })).toBeDefined()
+  await ui.press({ key: 'criteria-toggle' })
+  expect(await ui.find({ text: /item 10$/ })).toBeUndefined()
 })

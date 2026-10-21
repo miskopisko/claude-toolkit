@@ -42,6 +42,7 @@ const stack = atom({ plugin: 'desk', key: 'stack' } as const, EMPTY_STACK)
 const previous = atom({ plugin: 'desk', key: 'previous' } as const, null as Crumb | null)
 const now = atom({ plugin: 'desk', key: 'now' } as const, 0)
 const notedSession = atom({ plugin: 'desk', key: 'notedSession' } as const, null as string | null)
+const criteriaOpen = atom({ plugin: 'desk', key: 'criteriaOpen' } as const, false)
 
 /** Store keys, each per repository (or per folder outside one). */
 const keys = {
@@ -448,7 +449,14 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     startTicker($)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const [g, w, s, prev, tickAt] = await Promise.all([read($, git), read($, work), read($, stack), read($, previous), read($, now)])
+    const [g, w, s, prev, tickAt, isOpen] = await Promise.all([
+      read($, git),
+      read($, work),
+      read($, stack),
+      read($, previous),
+      read($, now),
+      read($, criteriaOpen),
+    ])
     const at = Math.max(tickAt, await $.clock.now())
     const cols = Math.max(24, e.props.bodyColumns - GUTTER)
     const barWidth = Math.max(6, Math.min(20, cols - 22))
@@ -551,12 +559,20 @@ export const register: Register = on => {
                     </Text>
                     <Text dimColor>{issue.criteriaSource === 'acceptance' ? ' criteria' : ' boxes'}</Text>
                   </Box>
-                  {issue.criteria.slice(0, CRITERIA_SHOWN).map((c, i) => (
+                  {(isOpen ? issue.criteria : issue.criteria.slice(0, CRITERIA_SHOWN)).map((c, i) => (
                     <Text key={`c${i}`} wrap="truncate-end" dimColor={c.isDone}>
                       <Text color={c.isDone ? 'success' : undefined}>{c.isDone ? '✓' : '○'}</Text> {c.text}
                     </Text>
                   ))}
-                  {issue.criteria.length > CRITERIA_SHOWN && <Text dimColor>+{issue.criteria.length - CRITERIA_SHOWN} more</Text>}
+                  {issue.criteria.length > CRITERIA_SHOWN && (
+                    <Button
+                      key="criteria-toggle"
+                      plain
+                      hotkey="c"
+                      label={isOpen ? 'show fewer' : `+${issue.criteria.length - CRITERIA_SHOWN} more`}
+                      onPress={() => update($, criteriaOpen, o => !o)}
+                    />
+                  )}
                 </>
               )}
             </>
