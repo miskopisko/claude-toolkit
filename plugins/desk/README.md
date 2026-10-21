@@ -21,8 +21,9 @@ come from a small config file each project writes for itself.
 - **Pull request**: the branch's PR, its review decision, its checks (passed,
   failed, running, and the names of the failing ones) and how many review
   threads are unresolved.
-- **Services**: your local dev services, each up or down, with a key to
-  start or stop it (see below).
+- **Services**: your local dev services, each up or down, with a key (`1`
+  to `9`, in order) to start or stop it, and `t` to trust the project's
+  config (see below).
 - **Last session**: when you last worked in this repository, and your last
   prompts there.
 
@@ -65,12 +66,14 @@ The pane opens by itself when the terminal is at least 144 columns wide.
     /desk note on|off   the where-you-left-off note
 
 The pane re-reads git and the services every 5 seconds while it's on screen,
-and GitHub every 90 seconds, after each turn and whenever you switch branch.
+and GitHub every 90 seconds, after a turn (at most every 20 seconds) and
+whenever you switch branch.
 
 ### Which issue
 
-desk takes the first issue the branch's PR closes (`Closes #12` in the PR, or
-a linked issue). Without one, it reads the number in the branch name:
+desk takes the first issue in this repository that the branch's PR closes
+(`Closes #12` in the PR, or a linked issue). Without one, it reads the number
+in the branch name:
 `implement/284-conflict-alert`, `feature/12_login`, `gh-7` and `123` all
 work, and `bump-1.2.3` names none. A team with another scheme sets
 `issuePattern` (below) to a regular expression whose first group is the number.
@@ -78,7 +81,8 @@ work, and `bump-1.2.3` names none. A team with another scheme sets
 ### Services
 
 Each project lists its services in `.claude/desk.json`, committed so the team
-shares it. `/stack init` writes one to start from:
+shares it. `/stack init` writes a two-service example to start from. A fuller
+one:
 
 ```json
 {
@@ -106,23 +110,29 @@ shares it. `/stack init` writes one to start from:
 }
 ```
 
-- `check` says how to tell the service is up: `{ "port": 5432 }` (and
-  optionally `"host"`), `{ "http": "<url>" }` (any answer is up), or
+- `check` says how to tell the service is up: `{ "port": 5432 }` (on
+  127.0.0.1 or ::1, or the `"host"` you give), `{ "http": "<url>" }` (any
+  answer is up), or
   `{ "command": "<shell>" }` (exit 0 is up). Without one, a service is up
   while the process desk started is alive. For an https dev server with a
   self-signed certificate, check its port.
 - `start` runs in the background, detached from Claude Code, so the service
-  keeps running when you quit. Its output goes to `.git/desk/<name>.log`.
+  keeps running when you quit. Its output goes to `.git/desk/<name>.log`,
+  the name lowercased with anything but letters and digits made `-` (`My
+  API` logs to `my-api.log`). Outside a git repository the logs go to a
+  folder under your temporary directory instead, never the project.
 - `stop` is optional. Without it, desk stops the whole process group it
   started (a `dotnet run` and its children, say). A service desk didn't
-  start needs a `stop` command to be stopped from desk.
-- `cwd` is relative to the repository.
+  start needs a `stop` command to be stopped from desk. A process desk
+  started keeps its stop for as long as it runs, even while its check
+  doesn't answer.
+- `cwd` is relative to the repository, or an absolute path.
 
 Your own services, or your own version of a team one, go in
 `.claude/desk.local.json` (keep it out of git). It has the same shape, and
 its services replace the team's by name.
 
-    /stack              each service and whether it's up
+    /stack [status]     each service and whether it's up
     /stack up [name…]   start the named services, or every one that's down
     /stack down [name…] stop the named services, or every one desk can stop
     /stack logs <name>  the last lines of a service's log

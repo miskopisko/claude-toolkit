@@ -21,7 +21,7 @@ export type IssueView = {
   /** The issue's place on each GitHub project board it is on. */
   columns: { project: string; status: string }[]
   criteria: Criterion[]
-  /** `acceptance`: the checkboxes under an acceptance-criteria heading; `all`: every checkbox in the body. */
+  /** `acceptance`: the checkboxes under an acceptance-criteria heading; `all`: every checkbox in the body; `none`: no checkboxes. */
   criteriaSource: 'acceptance' | 'all' | 'none'
 }
 
@@ -98,8 +98,8 @@ export type Crumb = {
   pr: { number: number; state: string } | null
 }
 
-/** A repository's trail: this session's crumb and the one before it. */
-export type Trail = { current: Crumb | null; previous: Crumb | null }
+/** A repository's trail: the last few sessions' crumbs, the latest first. */
+export type Trail = { crumbs: Crumb[] }
 
 declare module 'claude-code' {
   interface PluginState {

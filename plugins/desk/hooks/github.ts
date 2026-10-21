@@ -120,7 +120,22 @@ type PrJson = {
   url: string
   reviewDecision: string | null
   statusCheckRollup: RollupEntry[] | null
-  closingIssuesReferences: { number: number }[] | null
+  closingIssuesReferences: ClosingRef[] | null
+}
+
+type ClosingRef = { number: number; repository?: { name: string; owner: { login: string } } }
+
+/**
+ * The first issue a PR closes in this repository. One in another repository
+ * is passed over: the pane reads and opens issues here.
+ */
+export function closingIssue(refs: readonly ClosingRef[] | null, repo: { owner: string; name: string }): number | null {
+  const same = (refs ?? []).find(
+    r =>
+      r.repository === undefined ||
+      (r.repository.owner.login.toLowerCase() === repo.owner.toLowerCase() && r.repository.name.toLowerCase() === repo.name.toLowerCase()),
+  )
+  return same?.number ?? null
 }
 
 async function readPr($: EngineInterface, root: string, branch: string) {
@@ -226,7 +241,7 @@ export async function readWork(
             checks: summarizeChecks(prJson.statusCheckRollup ?? []),
             unresolved: prJson.state === 'OPEN' ? await unresolvedThreads($, root, repo, prJson.number) : 0,
           }
-    const issueNumber = prJson?.closingIssuesReferences?.[0]?.number ?? issueFromBranch(branch, issuePattern)
+    const issueNumber = closingIssue(prJson?.closingIssuesReferences ?? null, repo) ?? issueFromBranch(branch, issuePattern)
     const issue = issueNumber === null ? null : await readIssue($, root, issueNumber)
     return { ...base, issueNumber, issue, pr }
   } catch (err) {

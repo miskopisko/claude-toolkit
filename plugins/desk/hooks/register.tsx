@@ -7,7 +7,9 @@ import { gitDir, NO_GIT, readGit } from './git'
 import { openInBrowser, readWork } from './github'
 import {
   CONFIG_FILES,
+  fingerprint,
   hasCommands,
+  isAlive,
   loadConfig,
   logPath,
   probe,
@@ -18,7 +20,7 @@ import {
   viewOf,
 } from './stack'
 import type { LoadedConfig, ServiceSpec } from './stack'
-import { leftOffNote, previousOf, withAnswer, withPrompt } from './trail'
+import { asTrail, leftOffNote, previousOf, withAnswer, withPrompt } from './trail'
 
 const PANE = 'desk'
 const TITLE = 'Desk'
@@ -59,7 +61,10 @@ const rt = {
   config: null as LoadedConfig | null,
   doing: new Map<string, { action: 'start' | 'stop'; since: number }>(),
   workBranch: undefined as string | null | undefined,
-  isReadingWork: false,
+  /** The GitHub read under way, if one is. */
+  workRead: null as Promise<void> | null,
+  /** When the last GitHub read began. */
+  lastWorkAt: 0,
   isProbing: false,
 }
 
@@ -77,28 +82,52 @@ async function refreshGit($: EngineInterface): Promise<GitState> {
   return g
 }
 
-async function refreshWork($: EngineInterface) {
-  if (rt.isReadingWork) return
-  const g = await read($, git)
-  if (g.root === null) return
-  rt.isReadingWork = true
-  try {
+/**
+ * Reads GitHub again. One read runs at a time: an unforced call while one is
+ * under way does nothing, and a forced one (a refresh asked for) waits for it
+ * and reads once more, so what it shows is from after the ask.
+ */
+async function refreshWork($: EngineInterface, isForced = false) {
+  while (rt.workRead !== null) {
+    if (!isForced) return
+    await rt.workRead.catch(() => undefined)
+  }
+  rt.workRead = (async () => {
+    const g = await read($, git)
+    if (g.root === null) return
+    const root = g.root
     await update($, work, w => ({ ...w, isLoading: true }))
     const at = await $.clock.now()
-    const w = await readWork($, g.root, g.branch, rt.config?.config.issuePattern, at)
+    rt.lastWorkAt = at
+    const w = await readWork($, root, g.branch, rt.config?.config.issuePattern, at)
     rt.workBranch = g.branch
     await update($, work, () => w)
-    if (w.problem === null) await $.store.set(keys.work(g.root), { ...w, branch: g.branch })
+    if (w.problem === null) await $.store.set(keys.work(root), { ...w, branch: g.branch })
+  })()
+  try {
+    await rt.workRead
   } finally {
-    rt.isReadingWork = false
+    rt.workRead = null
   }
+}
+
+/** Where service logs go: the repository's git directory, else a temporary folder, never the project tree. */
+async function logDirOf($: EngineInterface, root: string): Promise<string> {
+  const dir = await gitDir($, root)
+  if (dir !== null) return `${dir}/desk`
+  let tmp: string | undefined
+  try {
+    tmp = await $.env.get('TMPDIR')
+  } catch {
+    tmp = undefined
+  }
+  return `${(tmp ?? '/tmp').replace(/\/+$/, '')}/claude-desk-logs/${fingerprint(root)}`
 }
 
 async function loadStack($: EngineInterface) {
   const root = await placeOf($)
   rt.config = await loadConfig($, root)
-  const dir = await gitDir($, root)
-  rt.logDir = dir === null ? `${root}/.claude/desk-logs` : `${dir}/desk`
+  rt.logDir = await logDirOf($, root)
   await probeServices($)
 }
 
@@ -138,8 +167,11 @@ async function probeServices($: EngineInterface) {
         return viewOf(spec, state, pid, trusted)
       }),
     )
-    // A process desk started that is gone is forgotten, so its stop is not offered.
-    const gone = views.filter(v => v.pid !== null && v.state === 'down').map(v => v.name)
+    // A process desk started that has exited is forgotten, so its stop is not offered. One still
+    // running whose check does not answer (slow, or checked at the wrong port) keeps its pid.
+    const quiet = views.filter(v => v.pid !== null && v.state === 'down')
+    const exited = await Promise.all(quiet.map(async v => !(await isAlive($, v.pid!))))
+    const gone = quiet.filter((_, i) => exited[i]).map(v => v.name)
     if (gone.length > 0) await writePids($, p => Object.fromEntries(Object.entries(p).filter(([n]) => !gone.includes(n))))
     await update($, stack, () => ({
       files: cfg.files,
@@ -157,6 +189,17 @@ function specNamed(name: string): ServiceSpec | undefined {
   return rt.config?.config.services.find(s => s.name.toLowerCase() === want)
 }
 
+/** The services a command's words name: all the words as one name (`Web App`), else each word as one. */
+function specsNamed(words: string[]): (ServiceSpec | undefined)[] {
+  const whole = specNamed(words.join(' '))
+  return whole !== undefined ? [whole] : words.map(specNamed)
+}
+
+/** Whether a service reads as running: up, starting, or a process desk started still alive. */
+function isRunning(v: ServiceView | undefined): boolean {
+  return v !== undefined && (v.state === 'up' || v.state === 'starting' || v.pid !== null)
+}
+
 /** Starts or stops one service; resolves what happened, in a line. */
 async function act($: EngineInterface, spec: ServiceSpec, action: 'start' | 'stop'): Promise<string> {
   const cfg = rt.config
@@ -164,13 +207,17 @@ async function act($: EngineInterface, spec: ServiceSpec, action: 'start' | 'sto
   if (!(await isTrusted($, cfg))) return `The desk config's commands are not trusted yet: read ${cfg.files.join(' and ')}, then /stack trust.`
   const root = await placeOf($)
   const at = await $.clock.now()
+  const logDir = rt.logDir ?? (await logDirOf($, root))
   try {
     if (action === 'start') {
       if (spec.start === undefined) return `${spec.name} has no start command.`
-      const pid = await startService($, root, rt.logDir ?? `${root}/.claude/desk-logs`, spec)
+      const view = (await read($, stack)).services.find(v => v.name === spec.name)
+      if (view?.state === 'up' || view?.state === 'starting') return `${spec.name} is already ${view.state}.`
+      if (view?.pid != null) return `${spec.name} is still running (process group ${view.pid}) but its check does not answer: /stack down ${spec.name} first.`
+      const pid = await startService($, root, logDir, spec)
       await writePids($, p => ({ ...p, [spec.name]: pid }))
       rt.doing.set(spec.name, { action, since: at })
-      return `${spec.name} starting (process group ${pid}); its log is ${logPath(rt.logDir ?? '', spec)}.`
+      return `${spec.name} starting (process group ${pid}); its log is ${logPath(logDir, spec)}.`
     }
     const pid = (await readPids($))[spec.name] ?? null
     await stopService($, root, spec, pid)
@@ -188,7 +235,7 @@ async function toggle($: EngineInterface, name: string) {
   const spec = specNamed(name)
   if (spec === undefined) return
   const view = (await read($, stack)).services.find(s => s.name === spec.name)
-  const line = await act($, spec, view?.state === 'up' || view?.state === 'starting' ? 'stop' : 'start')
+  const line = await act($, spec, isRunning(view) ? 'stop' : 'start')
   $.ui.toast(`desk: ${line}`)
 }
 
@@ -202,7 +249,6 @@ async function trust($: EngineInterface): Promise<string> {
 
 // The pane's clock: one tick every few seconds, run only while the pane is drawn.
 let ticker: Timer | null = null
-let lastWorkAt = 0
 
 function startTicker($: EngineInterface) {
   if (ticker !== null) return
@@ -213,10 +259,7 @@ function startTicker($: EngineInterface) {
     // The config is re-read too, so an edit to it shows without a refresh.
     rt.config = await loadConfig($, await placeOf($))
     await probeServices($)
-    if (at - lastWorkAt >= WORK_EVERY_MS) {
-      lastWorkAt = at
-      await refreshWork($)
-    }
+    if (at - rt.lastWorkAt >= WORK_EVERY_MS) await refreshWork($)
   })
 }
 
@@ -228,7 +271,7 @@ function stopTicker() {
 async function recordTrail($: EngineInterface, change: (t: Trail | null, sessionId: string, at: number) => Trail) {
   const root = await placeOf($)
   const [sessionId, at, stored] = await Promise.all([$.session.id(), $.clock.now(), $.store.get(keys.trail(root))])
-  await $.store.set(keys.trail(root), change((stored as Trail | undefined) ?? null, sessionId, at))
+  await $.store.set(keys.trail(root), change(asTrail(stored), sessionId, at))
 }
 
 /**
@@ -250,7 +293,7 @@ async function makeNote($: EngineInterface): Promise<string | null> {
   const live = await read($, work)
   const c = cached as (WorkView & { branch: string | null }) | undefined
   const w = live.at !== null ? live : c !== undefined && c.branch === g.branch ? c : null
-  return leftOffNote(g, w, previousOf((trail as Trail | undefined) ?? null, sessionId), at)
+  return leftOffNote(g, w, previousOf(asTrail(trail), sessionId), at)
 }
 
 function stateColor(state: ServiceView['state']): string | undefined {
@@ -265,19 +308,19 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'desk',
-      description: 'Toggle the desk pane: issue, PR and services for this branch (close, refresh, note on|off)',
+      description: 'Open the desk pane: issue, PR and services for this branch (close, refresh, note on|off)',
       argumentHint: '[close | refresh | note on|off]',
     })
     await $.command.register({
       name: 'stack',
       description: 'Your local dev services: status, up and down by name, logs, trust, init',
-      argumentHint: '[up|down [name…] | logs <name> | trust | init]',
+      argumentHint: '[status | up|down [name…] | logs <name> | trust | init]',
     })
     rt.cwd = e.cwd
     const g = await refreshGit($)
     const root = g.root ?? e.cwd
     const [sessionId, trail, cached] = await Promise.all([$.session.id(), $.store.get(keys.trail(root)), $.store.get(keys.work(root))])
-    await update($, previous, () => previousOf((trail as Trail | undefined) ?? null, sessionId))
+    await update($, previous, () => previousOf(asTrail(trail), sessionId))
     // The last read, shown until the first new one lands.
     const c = cached as (WorkView & { branch: string | null }) | undefined
     if (c !== undefined && c.branch === g.branch) await update($, work, () => ({ ...c, isLoading: true }))
@@ -298,7 +341,7 @@ export const register: Register = on => {
     }
     if (words[0] === 'refresh') {
       await refreshGit($)
-      await Promise.all([refreshWork($), loadStack($)])
+      await Promise.all([refreshWork($, true), loadStack($)])
       return { text: 'Desk refreshed.' }
     }
     if (words[0] === 'note') {
@@ -322,7 +365,12 @@ export const register: Register = on => {
     if (verb === 'init') {
       const path = `${root}/${CONFIG_FILES[0]}`
       if (await $.fs.exists(path)) return { text: `${CONFIG_FILES[0]} is there already.` }
-      await $.fs.write(path, TEMPLATE)
+      try {
+        // fs.write makes .claude/ when it is not there yet.
+        await $.fs.write(path, TEMPLATE)
+      } catch (err) {
+        return { text: `Could not write ${CONFIG_FILES[0]}: ${(err instanceof Error ? err.message : String(err)).slice(0, 160)}` }
+      }
       await loadStack($)
       return {
         text: `Wrote ${CONFIG_FILES[0]} with two example services: edit it for this project. Commit it to share with the team; put your own services in ${CONFIG_FILES[1]}.`,
@@ -343,7 +391,7 @@ export const register: Register = on => {
     if (verb === 'logs') {
       const spec = specNamed(names.join(' '))
       if (spec === undefined) return { text: `No service named "${names.join(' ')}".` }
-      const path = logPath(rt.logDir ?? '', spec)
+      const path = logPath(rt.logDir ?? (await logDirOf($, root)), spec)
       if (!(await $.fs.exists(path))) return { text: `${spec.name} has no log yet (desk keeps one for services it starts).` }
       const tail = (await $.fs.read(path)).split('\n').slice(-40).join('\n')
       return { text: `${path}, last lines:\n${tail}` }
@@ -355,9 +403,9 @@ export const register: Register = on => {
         names.length === 0
           ? cfg.config.services.filter(s => {
               const v = views.find(x => x.name === s.name)
-              return verb === 'up' ? v?.state === 'down' && s.start !== undefined : v?.state === 'up' && v.canStop
+              return verb === 'up' ? v?.state === 'down' && v.pid === null && s.start !== undefined : isRunning(v) && v!.canStop
             })
-          : names.map(n => specNamed(n))
+          : specsNamed(names)
       if (picked.some(s => s === undefined)) return { text: `No such service. The services: ${cfg.config.services.map(s => s.name).join(', ')}.` }
       if (picked.length === 0) return { text: verb === 'up' ? 'Nothing to start: every service is up or has no start command.' : 'Nothing desk can stop is running.' }
       const lines: string[] = []
@@ -389,10 +437,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined) return done
     const g = await refreshGit($)
     const at = await $.clock.now()
-    if (at - lastWorkAt >= WORK_AFTER_TURN_MS) {
-      lastWorkAt = at
-      void refreshWork($)
-    }
+    if (at - rt.lastWorkAt >= WORK_AFTER_TURN_MS) void refreshWork($)
     if (!e.isAborted) {
       const w = await read($, work)
       await recordTrail($, (t, id, when) => withAnswer(t, id, when, e.answer, g.branch, w))
@@ -555,8 +600,8 @@ export const register: Register = on => {
           </Text>
         )}
         {s.services.map((v, i) => {
-          const canPress = v.state === 'up' || v.state === 'starting' ? v.canStop : v.state === 'down' ? v.canStart : false
-          const verb = v.state === 'up' || v.state === 'starting' ? 'stop' : 'start'
+          const canPress = isRunning(v) ? v.canStop : v.state === 'down' ? v.canStart : false
+          const verb = isRunning(v) ? 'stop' : 'start'
           return (
             <Box key={`s${v.name}`}>
               <Box width={cols - 9} flexShrink={0}>
@@ -592,7 +637,7 @@ export const register: Register = on => {
         {root !== null && (
           <Box marginTop={1}>
             <Box marginRight={3} flexShrink={0}>
-              <Button key="refresh" plain hotkey="r" label="refresh" onPress={() => Promise.all([refreshGit($), refreshWork($), loadStack($)])} />
+              <Button key="refresh" plain hotkey="r" label="refresh" onPress={() => Promise.all([refreshGit($), refreshWork($, true), loadStack($)])} />
             </Box>
             {issue !== null && (
               <Box marginRight={3} flexShrink={0}>

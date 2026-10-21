@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { issueFromBranch, parseStatus } from '../hooks/git'
-import { parseCriteria, summarizeChecks } from '../hooks/github'
+import { closingIssue, parseCriteria, summarizeChecks } from '../hooks/github'
 import { fingerprint, hasCommands, mergeConfigs, parseConfig, stateOf } from '../hooks/stack'
-import { leftOffNote, previousOf, withAnswer, withPrompt } from '../hooks/trail'
+import { asTrail, leftOffNote, previousOf, withAnswer, withPrompt } from '../hooks/trail'
 
 describe('branches', () => {
   test('a branch names its issue by a number standing alone', () => {
@@ -88,6 +88,16 @@ describe('issues and PRs', () => {
     ])
     expect(sum).toEqual({ passed: 2, failed: 2, running: 1, skipped: 1, failing: ['lint', 'ci/legacy'] })
   })
+
+  test('the issue a PR closes is one in this repository', () => {
+    const repo = { owner: 'o', name: 'r' }
+    const elsewhere = { number: 12, repository: { name: 'other', owner: { login: 'o' } } }
+    const here = { number: 7, repository: { name: 'R', owner: { login: 'O' } } }
+    expect(closingIssue([elsewhere, here], repo)).toBe(7)
+    expect(closingIssue([elsewhere], repo)).toBe(null)
+    expect(closingIssue([{ number: 3 }], repo)).toBe(3)
+    expect(closingIssue(null, repo)).toBe(null)
+  })
 })
 
 describe('the stack config', () => {
@@ -133,14 +143,30 @@ describe('the trail', () => {
     t = withAnswer(t, 's1', 2000, 'Done.\nMore lines', 'b7', work)
     expect(previousOf(t, 's2')?.lastAnswer).toBe('Done.')
     t = withPrompt(t, 's2', 3000, 'where did I leave off?', 'b7')
-    expect(t.previous?.sessionId).toBe('s1')
+    expect(t.crumbs.map(c => c.sessionId)).toEqual(['s2', 's1'])
     expect(previousOf(t, 's2')?.prompts).toEqual(['start #7'])
+  })
+
+  test('two sessions open at once each keep their own prompts', () => {
+    let t = withPrompt(null, 'a', 1, 'a1', 'b')
+    t = withPrompt(t, 'b', 2, 'b1', 'b')
+    t = withPrompt(t, 'a', 3, 'a2', 'b')
+    t = withPrompt(t, 'b', 4, 'b2', 'b')
+    expect(previousOf(t, 'b')?.prompts).toEqual(['a1', 'a2'])
+    expect(previousOf(t, 'a')?.prompts).toEqual(['b1', 'b2'])
+    expect(previousOf(t, 'c')?.sessionId).toBe('b')
+  })
+
+  test('a trail kept by an earlier desk still reads', () => {
+    const crumb = { sessionId: 's1', at: 0, branch: null, prompts: ['old'], lastAnswer: null, issue: null, pr: null }
+    expect(previousOf(asTrail({ current: crumb, previous: null }), 's2')?.prompts).toEqual(['old'])
+    expect(asTrail(undefined)).toBe(null)
   })
 
   test('only the last five prompts are kept', () => {
     let t = null as ReturnType<typeof withPrompt> | null
     for (let i = 1; i <= 7; i++) t = withPrompt(t, 's', i, `p${i}`, null)
-    expect(t?.current?.prompts).toEqual(['p3', 'p4', 'p5', 'p6', 'p7'])
+    expect(t?.crumbs[0]?.prompts).toEqual(['p3', 'p4', 'p5', 'p6', 'p7'])
   })
 
   test('the note says the branch, the open criteria and the last session', () => {

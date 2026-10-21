@@ -151,7 +151,8 @@ function cwdOf(root: string, spec: ServiceSpec): string {
   return spec.cwd.startsWith('/') ? spec.cwd : `${root}/${spec.cwd}`
 }
 
-async function isAlive($: EngineInterface, pid: number): Promise<boolean> {
+/** Whether the process group desk started is still running. */
+export async function isAlive($: EngineInterface, pid: number): Promise<boolean> {
   try {
     return (await $.process.run(['sh', '-c', 'kill -0 "$1" 2>/dev/null', 'desk', String(pid)], { timeoutMs: 3000 })).exitCode === 0
   } catch {
@@ -174,8 +175,10 @@ export async function probe(
   try {
     if (check === undefined) return pid !== null && (await isAlive($, pid)) ? 'up' : pid === null && spec.start === undefined ? 'unknown' : 'down'
     if ('port' in check) {
+      // Without a host, IPv4 then IPv6: a dev server on `localhost` (Vite, say) often listens on ::1 alone.
+      const hosts = check.host === undefined ? ['127.0.0.1', '::1'] : [check.host]
       const r = await $.process.run(
-        ['bash', '-c', 'exec 3<>"/dev/tcp/$1/$2"', 'desk', check.host ?? '127.0.0.1', String(check.port)],
+        ['bash', '-c', 'p=$1; shift; for h; do (exec 3<>"/dev/tcp/$h/$p") 2>/dev/null && exit 0; done; exit 1', 'desk', String(check.port), ...hosts],
         { timeoutMs: 3000 },
       )
       return r.exitCode === 0 ? 'up' : 'down'
@@ -189,7 +192,7 @@ export async function probe(
     return r.exitCode === 0 ? 'up' : 'down'
   } catch {
     // A port check past its timeout, a refused connection, a check that hung: not up.
-    return check !== undefined && 'command' in check && !isTrusted ? 'unknown' : 'down'
+    return 'down'
   }
 }
 

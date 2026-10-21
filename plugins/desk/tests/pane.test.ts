@@ -58,7 +58,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 const fail = (stderr: string) => ({ value: { exitCode: 1, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } })
 
 /** git and gh as a repository with a PR and its issue answer them; `seen` collects each argv. */
-function fakeHost(on: On, seen: string[][] = [], withPr = true) {
+function fakeHost(on: On, seen: string[][] = [], withPr = true, pr: object = PR, hasProjectScope = true) {
   on('process.run', (_$, e) => {
     const argv = [...e.argv]
     seen.push(argv)
@@ -67,9 +67,11 @@ function fakeHost(on: On, seen: string[][] = [], withPr = true) {
     if (line === 'git rev-parse --absolute-git-dir') return ok('/repo/.git\n')
     if (line.startsWith('git status')) return ok(STATUS)
     if (line.startsWith('gh repo view')) return ok(JSON.stringify({ owner: { login: 'o' }, name: 'r' }))
-    if (line.startsWith('gh pr view')) return withPr ? ok(JSON.stringify(PR)) : fail('no pull requests found for branch "implement/7-thing"')
+    if (line.startsWith('gh pr view')) return withPr ? ok(JSON.stringify(pr)) : fail('no pull requests found for branch "implement/7-thing"')
     if (line.startsWith('gh api graphql'))
       return ok(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: false }, { isResolved: true }] } } } } }))
+    if (line.startsWith('gh issue view') && line.includes('projectItems') && !hasProjectScope)
+      return fail('error: your authentication token is missing required scopes [read:project]\nTo request it, run: gh auth refresh -s read:project')
     if (line.startsWith('gh issue view')) return ok(JSON.stringify(ISSUE))
     return fail(`unexpected: ${line}`)
   })
@@ -78,7 +80,7 @@ function fakeHost(on: On, seen: string[][] = [], withPr = true) {
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`${surface}: the pane shows the branch, its issue's criteria and its PR`, async ($, on) => {
     mock.clock(on, { now: 1_000_000 })
-  fakeSession(on)
+    fakeSession(on)
     fakeHost(on)
     await $.session.start({ cwd: '/repo', surface, isInteractive: false })
     const ui = await $.ui.mount({ plugin: 'desk', surface, component: 'Pane', requestId: 'desk', props: PANE })
@@ -127,4 +129,47 @@ test('without gh, the pane says so and git still shows', async ($, on) => {
 
   expect(await ui.find({ text: 'implement/7-thing' })).toBeDefined()
   expect(await ui.find({ text: 'gh is not installed' })).toBeDefined()
+})
+
+test('a token without the project scope still reads the issue, without its board', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  fakeSession(on)
+  const seen: string[][] = []
+  fakeHost(on, seen, true, PR, false)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+  const ui = await $.ui.mount({ plugin: 'desk', surface: 'terminal', component: 'Pane', requestId: 'desk', props: PANE })
+  await $.command.run(REFRESH)
+
+  expect(await ui.find({ text: /The thing/ })).toBeDefined()
+  expect(seen.some(a => a.join(' ') === 'gh issue view 7 --json number,title,state,url,body')).toBe(true)
+})
+
+test('an issue the PR closes in another repository is passed over for the branch name', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  fakeSession(on)
+  const seen: string[][] = []
+  fakeHost(on, seen, true, { ...PR, closingIssuesReferences: [{ number: 99, repository: { name: 'elsewhere', owner: { login: 'o' } } }] })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+  await $.command.run(REFRESH)
+
+  expect(seen.some(a => a.join(' ').startsWith('gh issue view 7 '))).toBe(true)
+  expect(seen.some(a => a.join(' ').startsWith('gh issue view 99 '))).toBe(false)
+})
+
+test('the left-off note rides beside the first prompt of a conversation only', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  fakeSession(on)
+  fakeHost(on)
+  const contexts: (readonly string[] | undefined)[] = []
+  on('prompt.submit', (_$, e) => {
+    contexts.push(e.context)
+    return { text: e.text }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: false })
+  const prompt = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+
+  await prompt('hello')
+  await prompt('again')
+  expect(contexts[0]?.[0]).toContain('Branch: implement/7-thing')
+  expect(contexts[1]).toBeUndefined()
 })

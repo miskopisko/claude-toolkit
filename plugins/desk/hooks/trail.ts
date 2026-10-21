@@ -2,21 +2,33 @@ import type { Crumb, GitState, Trail, WorkView } from '../types'
 import { ago, clip, criteriaCount } from './format'
 
 const PROMPTS_KEPT = 5
+/** Sessions kept per repository, so two open at once each keep their own crumb. */
+const SESSIONS_KEPT = 5
 
-function crumbFor(trail: Trail | null, sessionId: string, at: number): { trail: Trail; crumb: Crumb } {
-  const t = trail ?? { current: null, previous: null }
-  if (t.current?.sessionId === sessionId) return { trail: t, crumb: t.current }
-  // A new session in this repository: the one that was current becomes the previous one.
-  const crumb: Crumb = { sessionId, at, branch: null, prompts: [], lastAnswer: null, issue: null, pr: null }
-  return { trail: { current: crumb, previous: t.current ?? t.previous }, crumb }
+/** A trail as the store holds it; one kept as `{ current, previous }` by an earlier desk reads as its crumbs. */
+export function asTrail(stored: unknown): Trail | null {
+  if (typeof stored !== 'object' || stored === null) return null
+  const v = stored as { crumbs?: unknown; current?: Crumb | null; previous?: Crumb | null }
+  if (Array.isArray(v.crumbs)) return { crumbs: v.crumbs as Crumb[] }
+  return { crumbs: [v.current, v.previous].filter((c): c is Crumb => c != null) }
+}
+
+function crumbFor(trail: Trail | null, sessionId: string, at: number): Crumb {
+  return trail?.crumbs.find(c => c.sessionId === sessionId) ?? { sessionId, at, branch: null, prompts: [], lastAnswer: null, issue: null, pr: null }
+}
+
+/** The trail with this session's crumb, changed, first. */
+function withCrumb(trail: Trail | null, crumb: Crumb): Trail {
+  const others = (trail?.crumbs ?? []).filter(c => c.sessionId !== crumb.sessionId)
+  return { crumbs: [crumb, ...others].slice(0, SESSIONS_KEPT) }
 }
 
 /** The trail with a prompt added to this session's crumb. */
 export function withPrompt(trail: Trail | null, sessionId: string, at: number, text: string, branch: string | null): Trail {
-  const { trail: t, crumb } = crumbFor(trail, sessionId, at)
+  const crumb = crumbFor(trail, sessionId, at)
   const line = clip(text.replace(/\s+/g, ' ').trim(), 200)
-  if (line === '') return t
-  return { ...t, current: { ...crumb, at, branch, prompts: [...crumb.prompts, line].slice(-PROMPTS_KEPT) } }
+  if (line === '') return trail ?? { crumbs: [] }
+  return withCrumb(trail, { ...crumb, at, branch, prompts: [...crumb.prompts, line].slice(-PROMPTS_KEPT) })
 }
 
 /** The trail with this session's last answer and where the work stood. */
@@ -28,25 +40,21 @@ export function withAnswer(
   branch: string | null,
   work: WorkView,
 ): Trail {
-  const { trail: t, crumb } = crumbFor(trail, sessionId, at)
+  const crumb = crumbFor(trail, sessionId, at)
   const first = answer.trim().split('\n').find(l => l.trim() !== '')
-  return {
-    ...t,
-    current: {
-      ...crumb,
-      at,
-      branch,
-      lastAnswer: first === undefined ? crumb.lastAnswer : clip(first.trim(), 200),
-      issue: work.issue === null ? crumb.issue : { number: work.issue.number, title: work.issue.title },
-      pr: work.pr === null ? crumb.pr : { number: work.pr.number, state: work.pr.state },
-    },
-  }
+  return withCrumb(trail, {
+    ...crumb,
+    at,
+    branch,
+    lastAnswer: first === undefined ? crumb.lastAnswer : clip(first.trim(), 200),
+    issue: work.issue === null ? crumb.issue : { number: work.issue.number, title: work.issue.title },
+    pr: work.pr === null ? crumb.pr : { number: work.pr.number, state: work.pr.state },
+  })
 }
 
-/** The session before this one in the repository. */
+/** The latest other session in the repository. */
 export function previousOf(trail: Trail | null, sessionId: string): Crumb | null {
-  if (trail === null) return null
-  return trail.current?.sessionId === sessionId ? trail.previous : trail.current
+  return trail?.crumbs.find(c => c.sessionId !== sessionId) ?? null
 }
 
 /**
