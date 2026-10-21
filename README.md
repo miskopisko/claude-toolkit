@@ -31,6 +31,7 @@ At the Claude Code prompt, add the marketplace, then install by name:
     /plugin install desk@miskopisko
     /plugin install session-stats@miskopisko
     /plugin install log-time@miskopisko
+    /plugin install manual-test-plan@miskopisko
 
 Or from a shell, in one step each:
 
@@ -59,9 +60,15 @@ yourself.
   itself.
 - **log-time** talks to Harvest through the Harvest connector you connect in
   Claude Code, and keeps your settings in `~/.config/log-time/`.
+- **manual-test-plan** reads GitHub issues through your `gh` login, and picks
+  test records from your local database with read-only queries, using the
+  credentials in your project's local config without printing or saving
+  them. It asks before connecting to any database that isn't local. All it
+  writes goes in `manual-tests/` in your repo, which it keeps out of git with
+  a line in `.git/info/exclude`.
 
 Plugins keep what they remember in Claude Code's per-plugin store under your
-own Claude Code configuration directory. Skills keep settings in
+own Claude Code configuration directory. Skills that need settings keep them in
 `~/.config/<skill>/`. Either way it stays on your machine.
 
 ## Layout

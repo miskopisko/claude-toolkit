@@ -30,12 +30,12 @@ Call `list_time_entries` with `from` and `to` set to the date and `user_ids: [ha
 
 Run `${CLAUDE_SKILL_DIR}/day-activity.sh <YYYY-MM-DD> <scan_roots...>`, quoting each root. It fetches each repo, then lists:
 - the commits the user authored that day (matched on their git `user.email` and `user.name`, both the global ones and any set in each repo)
-- for GitHub repos, the PRs they're involved in that were open that day, with their linked issues
+- for GitHub repos, the PRs they're involved in that were open that day, with their linked issues, whether the user merged the PR that day (`by you` after the merge date), and how many reviews the user submitted on it that day
 
 Turn this into **tickets**:
 - Get the ticket number from the PR title, the branch name (`feature/412-…`, `fix/398-…`, `PROJ-123-…`) or the commit message (`#412`, `PROJ-123`, `AB#398`).
 - Match commits to PRs by subject or branch. Name each ticket by its issue title (for GitHub: `gh issue view <n> --json title` run in the repo) or else by its PR title.
-- Drop PRs that had no commits, merges or reviews from the user that day. A PR that was merely open is not work.
+- Drop PRs that had no commits, merges or reviews from the user that day (`your reviews that day: 0`, no `merged … by you`, and no matching commits). A PR that was merely open is not work.
 - Merges into a shared branch (such as `main` or `develop`) count as part of the ticket they merged, not as a ticket of their own.
 - Ignore repos whose matching rule says `skip`.
 

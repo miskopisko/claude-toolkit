@@ -18,8 +18,9 @@ elif command -v jq >/dev/null; then
 fi
 
 mkdir -p "$(dirname "$out")"
-# "<" only ever appears inside JSON strings, so < is always safe and keeps
-# "</script>" in the plan from closing the page's script tag.
+# In valid JSON, "<" can only appear inside strings, so replacing every "<"
+# with the escape < leaves the data unchanged and keeps a "</script>" in
+# the plan from closing the page's script tag.
 awk -v plan="$plan" '
   $0 == "__PLAN_JSON__" {
     while ((getline line < plan) > 0) { gsub(/</, "\\u003c", line); print line }

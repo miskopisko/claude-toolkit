@@ -33,6 +33,7 @@ Writing each item:
 - A check states the exact expected result from the spec: the value, the message, the status code. If the spec gives inputs and a rule, work out the expected value and show the arithmetic in the section intro. Never write "works correctly" or "behaves as expected".
 - Use the project's own words for things, from its glossary and docs.
 - Keep each section short enough to do in a few minutes. Split long ones.
+- Each section stands on its own. When it needs an action an earlier section already did (restore a record, sign in as another role, run the same request), write the step out again in full, with its own placeholder. Never write "repeat step 3b" or "run the request from section 3".
 - Say what data a case needs in `needs` ("an order that is already shipped", "a user with no orders") and refer to it in the items through a placeholder.
 
 **Questions.** When the spec is silent, vague or contradicts itself about something a check depends on, add an entry to `questions` and write the check against the most likely reading, saying so in the item. Don't invent requirements.

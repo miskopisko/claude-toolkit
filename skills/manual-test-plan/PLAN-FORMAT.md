@@ -39,7 +39,7 @@ A plan is one JSON file. `build-page.sh` puts it into `template.html`, which ren
         { "kind": "step", "text": "Filter by region **North**." },
         { "kind": "step", "text": "Click **Export CSV**." },
         { "kind": "check", "text": "The file has [[42]] data rows, all with region `North`." },
-        { "kind": "step", "text": "Run **1b · Export a report you can't see** in the requests file." },
+        { "kind": "step", "text": "Run **1a · Export a report you can't see** in the requests file." },
         { "kind": "check", "text": "It's refused with **403**." }
       ]
     }
@@ -63,7 +63,7 @@ A plan is one JSON file. `build-page.sh` puts it into `template.html`, which ren
 | `needs` | Data the cases need. The blind pass fills this in. The logistics pass turns each need into a fact (a record to use) or, when nothing fits, keeps it as a fact that says what to create. Not rendered. |
 | `sections` | The tests, in order. |
 
-A section has a unique lowercase `id` (letters, digits, `-`), a `title`, an optional `intro` and `items`. An item has a `kind`, `"step"` (something to do, marked done) or `"check"` (something to observe, marked pass or fail), its `text`, and an optional `snippet` (`label`, `text`) shown with a Copy button, for a command or query to run. API calls are named requests in the plan's `.http` file, never snippets or `curl` commands.
+A section has a unique lowercase `id` (letters, digits, `-`; any word is fine, including `questions`, since the page keeps them apart from its own elements), a `title`, an optional `intro` and `items`. An item has a `kind`, `"step"` (something to do, marked done) or `"check"` (something to observe, marked pass or fail), its `text`, and an optional `snippet` (`label`, `text`) shown with a Copy button, for a command or query to run. API calls are named requests in the plan's `.http` file, never snippets or `curl` commands.
 
 ## Text
 

@@ -28,7 +28,7 @@ Then:
 
 ## Your settings
 
-Setup writes `~/.config/log-time/config.json`. It lives outside the plugin, so updates never overwrite it and nothing personal is shared. [`config.example.json`](config.example.json) shows the format:
+Setup writes `~/.config/log-time/config.json` (or `$XDG_CONFIG_HOME/log-time/config.json` if you set that). It lives outside the plugin, so updates never overwrite it and nothing personal is shared. [`config.example.json`](config.example.json) shows the format:
 
 | Field | Meaning |
 |---|---|

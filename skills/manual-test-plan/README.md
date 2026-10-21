@@ -25,11 +25,11 @@ For GitHub issues, install [`gh`](https://cli.github.com/) and run `gh auth logi
 1. **Finds the ticket** from the argument, the branch's PR, or the branch name.
 2. **Writes the cases blind.** A subagent that never sees the code or the diff writes the test cases from the ticket, its linked issues and the project's docs. The cases test the change against what was asked, not against what was built. Where the spec is unclear, the page lists questions to settle.
 3. **Fills in the practical details** from the code: how to start the app and the URLs. It never changes what a check expects. A spec and code that disagree become a question on the page.
-4. **Writes the API requests** to a `.http` file next to the page: one named request per case, matching the step that runs it. There are no `curl` commands to piece together.
+4. **Writes the API requests** to a `.http` file next to the page, with one block per section of the page, in the same order. Each block holds every request its section runs, repeating any an earlier section already had, so you work down the file as you work down the page. There are no `curl` commands to piece together.
 5. **Picks real records** from your local database, with read-only queries, so each case names a record to use. Credentials are read from the project's local config and never written anywhere.
-6. **Builds the page** in `.manual-tests/` at the repository root, git-ignored through `.git/info/exclude`, and opens it.
+6. **Builds the page** in `manual-tests/` at the repository root, git-ignored through `.git/info/exclude`, and opens it.
 
-It never edits code or tracked files, commits, or writes to a database. Everything it writes stays in `.manual-tests/`.
+It never edits code or tracked files, commits, or writes to a database. Everything it writes stays in `manual-tests/`.
 
 ## The page
 

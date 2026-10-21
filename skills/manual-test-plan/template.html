@@ -192,10 +192,12 @@ catch (err) {
   throw err;
 }
 
+const QID = '_questions';
 const SECTIONS = (PLAN.sections || []).slice();
 if ((PLAN.questions || []).length) {
   SECTIONS.unshift({
-    id: 'questions', title: 'Questions for the spec', cls: 'questions',
+    // Plan section ids are lowercase letters, digits and '-', so '_questions' can't clash.
+    id: QID, title: 'Questions for the spec', cls: 'questions',
     intro: 'Gaps or disagreements found while writing this plan. Settle them before trusting a check that depends on them.',
     items: PLAN.questions.map((q) => ({ kind: 'question', text: q })),
   });
@@ -227,14 +229,19 @@ try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || '{}')
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {} };
 
 const host = document.getElementById('sections');
+// Each section's element, by section id. DOM ids get a prefix so a section
+// called e.g. `export` or `title` can't clash with the page's own elements.
+const sectionEls = new Map();
 const isCheck = (it) => it.kind === 'check';
 const kindLabel = { step: 'Step', check: 'Check', question: 'Question' };
 
 function render() {
   host.innerHTML = '';
+  sectionEls.clear();
   SECTIONS.forEach((sec) => {
     const el = document.createElement('section');
-    el.id = sec.id;
+    el.id = `sec-${sec.id}`;
+    sectionEls.set(sec.id, el);
     if (sec.cls) el.className = sec.cls;
     el.innerHTML = `<h2><span>${md(sec.title)}</span><span class="tally"></span></h2>` +
       (sec.intro ? `<p class="intro">${md(sec.intro)}</p>` : '');
@@ -255,7 +262,7 @@ function render() {
     el.appendChild(ol);
     const notes = document.createElement('textarea');
     notes.className = 'notes';
-    notes.placeholder = sec.id === 'questions' ? 'Answers…' : 'Notes for this section…';
+    notes.placeholder = sec.id === QID ? 'Answers…' : 'Notes for this section…';
     notes.value = state.notes[sec.id] || '';
     notes.addEventListener('input', () => { state.notes[sec.id] = notes.value; save(); });
     el.appendChild(notes);
@@ -283,11 +290,11 @@ function refresh() {
       if (isCheck(it)) { sc++; if (m === 'pass') sp++; if (m === 'fail') sf++; }
       else { ss++; if (m === 'done') sd++; }
     });
-    if (sec.id !== 'questions') { checks += sc; pass += sp; fail += sf; steps += ss; did += sd; }
-    const el = document.getElementById(sec.id);
+    if (sec.id !== QID) { checks += sc; pass += sp; fail += sf; steps += ss; did += sd; }
+    const el = sectionEls.get(sec.id);
     const parts = [];
     if (sc) parts.push(`${sp + sf}/${sc} checked` + (sf ? ` · ${sf} failed` : ''));
-    if (ss) parts.push(sec.id === 'questions' ? `${sd}/${ss} settled` : `${sd}/${ss} steps`);
+    if (ss) parts.push(sec.id === QID ? `${sd}/${ss} settled` : `${sd}/${ss} steps`);
     el.querySelector('.tally').textContent = parts.join(' · ');
     el.classList.toggle('done', sc + ss > 0 && sp === sc && sd === ss);
     el.classList.toggle('hasfail', sf > 0);
@@ -316,14 +323,15 @@ function toast(msg) {
 }
 
 async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); }
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
   catch (_) {
     const ta = document.createElement('textarea');
     ta.value = text; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); } catch (_) {}
+    try { ok = document.execCommand('copy'); } catch (_) {}
     ta.remove();
   }
-  toast('Copied');
+  toast(ok ? 'Copied' : 'Copy failed: your browser blocked the clipboard');
 }
 
 document.getElementById('reset').addEventListener('click', () => {
@@ -340,7 +348,7 @@ document.getElementById('export').addEventListener('click', () => {
       if (isCheck(it)) lines.push(`  [${m === 'pass' ? 'PASS' : m === 'fail' ? 'FAIL' : '    '}] ${plain(it.text)}`);
       else if (it.kind === 'question') lines.push(`  [${m === 'done' ? 'SETTLED' : 'OPEN'}] ${plain(it.text)}`);
     });
-    if (state.notes[sec.id]) lines.push(`  Notes: ${state.notes[sec.id]}`);
+    if (state.notes[sec.id]) lines.push(`  Notes: ${state.notes[sec.id].replace(/\n/g, '\n         ')}`);
   });
   copyText(lines.join('\n'));
 });

@@ -7,9 +7,9 @@ allowed-tools: Bash(${CLAUDE_SKILL_DIR}/build-page.sh *)
 
 # Build a manual test plan
 
-The result is one HTML page in `<repo>/.manual-tests/`, opened in the browser. The user works through it at their own pace: steps get marked done, checks pass or fail, each section takes notes, and **Copy results** gives a summary to paste back here.
+The result is one HTML page in `<repo>/manual-tests/`, opened in the browser. The user works through it at their own pace: steps get marked done, checks pass or fail, each section takes notes, and **Copy results** gives a summary to paste back here.
 
-This skill only reads, apart from its own files in `.manual-tests/`. Never edit code or tracked files, stage, commit, or write to a database while running it.
+This skill only reads, apart from its own files in `manual-tests/`. Never edit code or tracked files, stage, commit, or write to a database while running it.
 
 ## 1. Find the ticket
 
@@ -20,9 +20,17 @@ Use the argument if there is one: a number, `#412`, `PROJ-123` or a URL. Otherwi
 
 If none of these gives a ticket, or more than one is plausible, ask. For a GitHub issue, `gh issue view <n>` must work. For another tracker, use its connector if one is available; otherwise ask the user to paste the spec.
 
-Name the page `<ticket>-<short-slug>`, e.g. `412-csv-export` or `PROJ-123-login-lockout`. The plan file is `.manual-tests/<name>.json`, the page `.manual-tests/<name>.html` and any requests file `.manual-tests/<name>.http`, all under the repository root.
+Name the page `<ticket>-<short-slug>`, e.g. `412-csv-export` or `PROJ-123-login-lockout`. The plan file is `manual-tests/<name>.json`, the page `manual-tests/<name>.html` and any requests file `manual-tests/<name>.http`, all under the repository root.
 
-Make sure `.manual-tests/` is ignored without touching tracked files: add the line to the file `git rev-parse --git-path info/exclude` names, if it isn't there yet.
+Make sure `manual-tests/` is ignored without touching tracked files. From the repository root, run this. It adds `/manual-tests/` to the repository's `info/exclude` only if the line isn't there yet, so it's safe to run every time:
+
+```sh
+f=$(git rev-parse --git-path info/exclude) && mkdir -p "$(dirname "$f")" &&
+  { grep -qxF '/manual-tests/' "$f" 2>/dev/null ||
+    { [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ] && echo >> "$f"; echo '/manual-tests/' >> "$f"; }; }
+```
+
+Earlier versions wrote to a hidden `.manual-tests/` folder. If one exists, leave it alone: don't move, copy or delete it, and don't read its plans as `related`.
 
 If a page with that name exists, ask whether to replace it (its ticks start over) or keep it and stop.
 
@@ -46,7 +54,7 @@ Read the plan. Now the code may be used, **for logistics only**: replace each `{
 - **API calls:** see step 3a. Never give `curl` commands.
 - **Data:** see step 4.
 
-Then set `key`, `environment`, `generated` and `facts`, and list other plans in `.manual-tests/` for the same or linked tickets under `related`.
+Then set `key`, `environment`, `generated` and `facts`, and list other plans in `manual-tests/` for the same or linked tickets under `related`.
 
 Rules for this pass:
 
@@ -56,32 +64,52 @@ Rules for this pass:
 
 ## 3a. API requests
 
-Every API call in the plan is a named request in one `.http` file, `.manual-tests/<name>.http` next to the page, so nothing has to be typed or pieced together by hand. Write it whenever the plan makes any API call, in the format both VS Code's REST Client and JetBrains' HTTP Client run. If the repository already has `.http` or `.rest` files, reuse their base URL, variables and auth setup so the file feels familiar, but don't edit them.
+Every API call in the plan is a named request in one `.http` file, `manual-tests/<name>.http` next to the page, so nothing has to be typed or pieced together by hand. Write it whenever the plan makes any API call, in the format both VS Code's REST Client and JetBrains' HTTP Client run. If the repository already has `.http` or `.rest` files, reuse their base URL, variables and auth setup so the file feels familiar, but don't edit them.
 
 ```http
-# Requests for the #412 manual test plan. Run them one at a time, in the
-# order the page gives.
+# Requests for the #412 manual test plan: one block per section of the page,
+# in the same order. Work down the block for the section you're on. A request
+# a section needs again is repeated in it, so there's no scrolling back.
 @baseUrl = http://localhost:3000
 # Paste a token for the signed-in test user. This file is git-ignored.
 @token =
 
-### 1b · Export a report you can't see (expect 403)
-# @name exportForbidden
+### ━━━━━━━━━━━━━━━━ 1 · Viewers can't export ━━━━━━━━━━━━━━━━
+
+### 1a · Export a report you can't see (expect 403)
+# @name exportForbidden1a
 GET {{baseUrl}}/api/reports/99/export.csv
 Authorization: Bearer {{token}}
 
+### ━━━━━━━━━━━━━━━━ 3 · Saved filters ━━━━━━━━━━━━━━━━
+
 ### 3a · Export with an empty filter (expect 400)
-# @name exportEmptyFilter
+# @name exportEmptyFilter3a
 POST {{baseUrl}}/api/reports/17/export
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 { "filters": { "region": "" } }
+
+### 3b · Clear the saved filter (expect 204)
+# @name clearFilter3b
+DELETE {{baseUrl}}/api/reports/17/filters
+Authorization: Bearer {{token}}
+
+### ━━━━━━━━━━━━━━━━ C · Cleanup ━━━━━━━━━━━━━━━━
+
+### Ca · Clear the saved filter (expect 204), same as 3b
+# @name clearFilterCa
+DELETE {{baseUrl}}/api/reports/17/filters
+Authorization: Bearer {{token}}
 ```
 
-- Title each request `### <section><letter> · <what it does> (expect <status>)`, matching the step that runs it. Give it a `# @name`.
+- **One block per section, in page order.** Open each block with a banner: a `###` line holding the section's number and title between `━` rules, and nothing else, so neither client sends it. Skip sections that make no API call.
+- **A section's block holds every request that section runs, in the order its steps run them.** When a section needs a request again that an earlier one already has (restoring a record, signing in as another role), write it out again in full in this block, and say `same as 3b` in its title. Never send the user to another section's request.
+- Title each request `### <section><letter> · <what it does> (expect <status>)`. `<section>` is the number its section's title starts with (`R` for Regression, `C` for Cleanup), and `<letter>` counts the requests within that block in order, repeats included: the first is `a`, the next `b`. Give it a `# @name` that ends with the same `<section><letter>`, so names stay unique when a request repeats.
 - Put the base URL, record ids used more than once, and auth in variables at the top. Work out how to get a token from the README, docs or auth setup, and say how in the comment above `@token`. Never write a real secret into the file: leave values the user has to supply empty, with a comment.
 - One request per call the plan makes, including each refused one, with the body that case needs. Don't rely on the user editing a request between steps; give each variant its own request.
-- In the plan, the step names the request ("Run **1b · Export a report you can't see** in the requests file") and the checks state what the response should be. Add a `facts` row linking the file: `[412-csv-export.http](412-csv-export.http)`, and say which clients run it.
+- In the plan, the step names the request ("Run **1a · Export a report you can't see** in the requests file") and the checks state what the response should be. Add a `facts` row linking the file: `[412-csv-export.http](412-csv-export.http)`, and say which clients run it.
 
 ## 4. Pick real records
 
