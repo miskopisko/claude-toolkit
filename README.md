@@ -21,6 +21,19 @@ want.
 | [log-time](skills/log-time) | Logs a day's work to Harvest from the tickets in your git commits and GitHub PRs. |
 | [manual-test-plan](skills/manual-test-plan) | Builds a manual test plan for the ticket you're on, as a web page to tick through: cases written from the spec, not the code, with real records from your local database. |
 
+**Workflow skills** take a GitHub ticket from pick-up to merged PR. They share
+one per-project config, `.claude/workflow.json` (plus a git-ignored
+`.claude/workflow.local.json` for your own overrides), and work out anything
+unset from git and `gh`.
+
+| Skill | What it does |
+| --- | --- |
+| [next](skills/next) | Orients you on an epic: what's in flight, what's takeable, what's blocked, and the one thing to do next. Read-only. |
+| [prep-branch](skills/prep-branch) | Starts a ticket: a branch cut from the latest trunk, nothing in the way, and the ticket assigned to you (and moved to In progress on your board). |
+| [gate](skills/gate) | Runs your CI checks locally against the staged change, and checks it against the ticket's acceptance criteria. |
+| [commit-pr](skills/commit-pr) | Commits the staged change and opens a PR in the repo's own style, then moves the tickets to In review and ticks their met criteria. |
+| [pr-comments](skills/pr-comments) | Works a PR's unresolved review threads: assesses each finding, fixes the agreed ones, then replies and resolves. |
+
 Each one's README covers what it does, its commands and its settings.
 
 ## Install
@@ -32,6 +45,7 @@ At the Claude Code prompt, add the marketplace, then install by name:
     /plugin install session-stats@miskopisko
     /plugin install log-time@miskopisko
     /plugin install manual-test-plan@miskopisko
+    /plugin install next@miskopisko          # and prep-branch, gate, commit-pr, pr-comments
 
 Or from a shell, in one step each:
 
@@ -70,10 +84,19 @@ yourself.
   them. It asks before connecting to any database that isn't local. All it
   writes goes in `manual-tests/` in your repo, which it keeps out of git with
   a line in `.git/info/exclude`.
+- **The workflow skills** (next, prep-branch, gate, commit-pr, pr-comments)
+  work through your `gh` login. They read settings from `.claude/workflow.json`
+  and `.claude/workflow.local.json` in your repo. gate runs only the commands in
+  that config, and shows them to you before running ones it hasn't seen. Only
+  prep-branch, commit-pr and pr-comments write to GitHub (assigning, board
+  moves, PRs, review replies). prep-branch asks before every push,
+  commit-pr pushes only once you've approved its commit message, and
+  pr-comments asks before replying.
 
 Plugins keep what they remember in Claude Code's per-plugin store under your
-own Claude Code configuration directory. Skills that need settings keep them in
-`~/.config/<skill>/`. Either way it stays on your machine.
+own Claude Code configuration directory. Skills that need personal settings
+keep them in `~/.config/<skill>/`, and per-project ones in your repo's
+`.claude/`. Either way it stays on your machine.
 
 ## Layout
 
@@ -93,17 +116,23 @@ skills/
     SKILL.md            the skill
     README.md           what it does and how to use it
     …                   any scripts or reference files it uses
+scripts/
+  check-shared.sh       checks that files several skills ship (workflow.py, board.py) are identical
 ```
 
 A skill has no `plugin.json`. Its entry in `marketplace.json` (with
 `"strict": false`) carries its version and details, so the skill folder stays
-a plain skill folder that also works copied into `~/.claude/skills`.
+a plain skill folder that also works copied into `~/.claude/skills`. For the
+same reason, a helper several skills need is copied into each of them rather
+than shared: edit one copy, copy it over the others, and run
+`scripts/check-shared.sh`.
 
 ## Develop
 
 Validate the marketplace from the repository root:
 
     claude plugin validate .
+    scripts/check-shared.sh
 
 Validate and test one plugin from its folder:
 

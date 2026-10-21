@@ -2,7 +2,7 @@
   "name": "miskopisko",
   "owner": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
   "metadata": {
-    "description": "Claude Code skills and plugins for day-to-day dev work: side panes, session stats, time tracking and manual test plans."
+    "description": "Claude Code skills and plugins for day-to-day dev work: side panes, session stats, time tracking, manual test plans, and a ticket-to-PR workflow."
   },
   "plugins": [
     {
@@ -42,6 +42,76 @@
       "license": "MIT",
       "category": "testing",
       "keywords": ["testing", "manual-testing", "qa", "test-plan"]
+    },
+    {
+      "name": "next",
+      "source": "./skills/next",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Orient on an epic: what's in flight, what's takeable, what's blocked, and the one thing to do next. Read-only.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/next",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["github", "issues", "planning", "workflow"]
+    },
+    {
+      "name": "prep-branch",
+      "source": "./skills/prep-branch",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Start a ticket: put you on a branch cut from the latest trunk, with nothing in the way, and take the ticket (assign it, and move its board card to In progress).",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/prep-branch",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["git", "github", "branching", "workflow"]
+    },
+    {
+      "name": "gate",
+      "source": "./skills/gate",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Run your project's CI checks locally against the staged change, and check it against the ticket's acceptance criteria.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/gate",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["ci", "testing", "github", "workflow"]
+    },
+    {
+      "name": "commit-pr",
+      "source": "./skills/commit-pr",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Commit the staged change and open a PR in the repo's own style, then move the tickets to In review and tick their met acceptance criteria.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/commit-pr",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["git", "github", "pull-requests", "workflow"]
+    },
+    {
+      "name": "pr-comments",
+      "source": "./skills/pr-comments",
+      "strict": false,
+      "skills": ["./"],
+      "version": "0.1.0",
+      "description": "Work a PR's unresolved review threads end to end: assess each finding, fix the agreed ones, then reply and resolve.",
+      "author": { "name": "Michael Piskuric", "url": "https://github.com/miskopisko" },
+      "homepage": "https://github.com/miskopisko/claude-toolkit/tree/main/skills/pr-comments",
+      "repository": "https://github.com/miskopisko/claude-toolkit",
+      "license": "MIT",
+      "category": "development",
+      "keywords": ["github", "code-review", "pull-requests", "workflow"]
     }
   ]
 }
