@@ -5,8 +5,8 @@ Part of [claude-toolkit](../../README.md). See there for everything else in it a
 Builds a manual test plan for the ticket you're working on, as a web page you work through by hand before committing. Each step gets marked done and each check pass or fail, every section takes notes, and **Copy results** gives you a summary to paste back to Claude.
 
 ```
-/manual-test-plan:manual-test-plan          # the ticket of the branch you're on
-/manual-test-plan:manual-test-plan 412      # a specific ticket
+/manual-test-plan          # the ticket of the branch you're on
+/manual-test-plan 412      # a specific ticket
 ```
 
 You can also just ask Claude to "write a manual test plan for this".

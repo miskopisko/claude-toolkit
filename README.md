@@ -43,8 +43,12 @@ To pick up new versions later:
 
 `/plugin` with no arguments opens a browser of everything in the marketplace.
 
-A skill from an installed plugin runs as `/<plugin>:<skill>`, for example
-`/log-time:log-time`, or Claude picks it up when you ask for that task.
+Run a skill by its name, for example `/log-time`, or just ask for the task
+and Claude picks it up. Claude Code lists a plugin's skills as
+`/<plugin>:<skill>` (here `/log-time:log-time`), but a skill that sets `name`
+in its `SKILL.md`, as every skill here does, also answers to the bare name
+unless another command already has it
+([docs](https://code.claude.com/docs/en/skills)).
 
 ## Your data and credentials
 
